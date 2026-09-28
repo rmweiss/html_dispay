@@ -2,6 +2,8 @@
 
 Minimal Go control server for a dedicated Chromium kiosk display.
 
+See the [documentation](docs/README.md) for current behavior, deployment notes, and planned work.
+
 ## Pages
 
 - `GET /` shows an informational landing/status page
