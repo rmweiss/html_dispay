@@ -1,6 +1,14 @@
 # Kiosk deployment
 
-## Requirements in this repository
+## Checked-in NixOS configuration
+
+The [current machine configuration](../config/nixos/configuration.nix) is a copy of the supplied `/etc/nixos/configuration.nix`. It configures an N100 appliance with Sway launching Chromium, the Go server as a systemd service, PipeWire/WirePlumber audio, Intel media acceleration, and an `html-display` state directory. It is a record of the working setup, not a complete NixOS installation.
+
+It imports `./hardware-configuration.nix`, which is generated for the machine and is **not** in this repository. The Go binary must also be built and installed at `/opt/html-display/html-display-server`; the NixOS file does not build or package it. Review paths and machine-specific settings before using the file on another host.
+
+The configuration enables OpenSSH with password authentication and `PermitRootLogin = "yes"`, as used on this LAN appliance. It opens the SSH firewall port and TCP 8080. The Go server listens on all interfaces on port 8080; keep network exposure within the intended trusted LAN. Chromium's CDP port 9222 is used locally and is not opened in the NixOS firewall. The config starts Chromium with `--remote-debugging-port=9222`; the Go server connects to `127.0.0.1:9222`.
+
+## Build and startup
 
 Build the Go 1.24 module:
 
@@ -8,12 +16,8 @@ Build the Go 1.24 module:
 CGO_ENABLED=0 go build -o html-display-server .
 ```
 
-The server expects an existing Chromium kiosk page at `http://127.0.0.1:8080/`, CDP on `127.0.0.1:9222`, a writable `/var/lib/html-display` directory, and port 8080 reachable by intended controllers. Its addresses and paths are constants in [main.go](../main.go), not configuration options. The binary can be installed at `/opt/html-display/html-display-server`. A NixOS systemd unit can use `StateDirectory = "html-display";` to manage the persistent state path. Start it after Chromium is ready; the server currently does not wait and retry its initial CDP connection.
+Install that binary at `/opt/html-display/html-display-server` as expected by the checked-in unit. The unit uses `StateDirectory = "html-display";` to manage `/var/lib/html-display`, which holds the latest uploaded HTML document. It requires and starts after `html-display-sway.service`, and a Sway restart also restarts the controller. The Go process still exits if CDP or the exact kiosk page target is not ready when it first connects; systemd's restart policy retries the process.
 
-## Reported working machine
+Sway starts Chromium at `http://127.0.0.1:8080/` in kiosk mode with XWayland (`--ozone-platform=x11`) and a volatile profile under `/run/html-display/chromium`. It hides the pointer after two seconds of inactivity. Chromium uses `--autoplay-policy=no-user-gesture-required`; PipeWire/WirePlumber is configured to prefer an available HDMI/DisplayPort sink. The notes for this machine report working browser audio and N100 hardware decoding for H.264 and AV1. Those observations depend on the connected hardware and were not re-tested as part of this documentation change.
 
-The earlier project notes describe an N100 mini PC running NixOS as an appliance, with Sway launching Chromium in kiosk mode on an external monitor. Chromium uses XWayland (`--ozone-platform=x11`), a volatile profile under `/run/html-display/chromium`, and CDP bound to loopback only. Sway hides the pointer after inactivity. The Go service was reported running on port 8080, coupled to the Sway service so a kiosk restart also restarts the controller.
-
-Those notes also report PipeWire/WirePlumber audio with a preferred available HDMI/DisplayPort sink and Chromium's `--autoplay-policy=no-user-gesture-required`. Browser audio playback and N100 hardware video decoding for H.264 and AV1 were reported as tested on that machine. The machine's `system.stateVersion = "26.05"` is a NixOS installation compatibility value, not proof of the currently running release.
-
-**Scope of verification:** This repository contains Go code and a README, but no `configuration.nix`, systemd unit, or hardware configuration. Treat the machine details above as a historical deployment report and verify them against the actual NixOS configuration before reproducing or changing the appliance. The current repository code can confirm the CDP address, startup URL, port, state path, and build command.
+`system.stateVersion = "26.05"` is the installation compatibility setting in the supplied file, not a claim about the currently running NixOS release.
