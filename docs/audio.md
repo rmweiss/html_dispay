@@ -2,9 +2,9 @@
 
 HTML Display is the kiosk host. It navigates Chromium to a URL or serves a complete uploaded HTML page; it does not interpret scene definitions or mix audio. The [Scene Composer audio design](https://github.com/rmweiss/scene_composer/blob/main/docs/audio.md) is the current design direction for scene audio. Scene Composer's audio API is itself planned, not implemented on its current main branch.
 
-## Proposed integration
+## Normal path: Scene Composer
 
-When Scene Composer is displayed on the kiosk, its browser player will own playback through one Web Audio `AudioContext`, with source gains, background/effects buses, and a master gain. Scene Composer's server owns the desired logical audio state and accepts effect triggers on a scene instance. The browser on each display produces its own sound. Background tracks start with an active instance and can loop; effects play only on command, and repeated triggers may overlap. Shared scene state does not imply synchronized playback clocks across displays.
+Audio should nearly always go through Scene Composer at the current stage of both projects. When Scene Composer is displayed on the kiosk, its browser player will own playback through one Web Audio `AudioContext`, with source gains, background/effects buses, and a master gain. Scene Composer's server owns the desired logical audio state and accepts effect triggers on a scene instance. The browser on each display produces its own sound. Background tracks start with an active instance and can loop; effects play only on command, and repeated triggers may overlap. Shared scene state does not imply synchronized playback clocks across displays.
 
 The proposed trigger is on **Scene Composer**, not HTML Display:
 
@@ -19,6 +19,8 @@ The response confirms that the command was accepted, not that the sound finished
 
 HTML Display's reported NixOS setup already supports browser audio through PipeWire and an HDMI/DisplayPort sink; see [deployment](deployment.md). Displaying Scene Composer should therefore require no special audio endpoint in HTML Display. A locally generated HTML document can likewise play audio through the browser if its own code and asset URLs handle it.
 
-## Separate open decision
+## Possible independent audio
 
-The original HTML Display notes also express a wish to **send an audio file directly to the client**. That is a different operation from triggering a named Scene Composer effect. Neither repository's current implementation provides that direct upload/play command. The Scene Composer design does not settle whether HTML Display needs one. Add it only if a use case requires sound independent of the displayed page or Scene Composer instance; then define where the file is stored, playback concurrency, volume, and what navigation or restart does to it.
+There may eventually be a reason to play a spontaneous sound, or background music while the kiosk displays a page that does not come from Scene Composer. That would be independent of a Scene Composer instance and its named effects. It is a **possible future capability**, not a current requirement or implemented API. In particular, do not assume that sending an arbitrary audio file to HTML Display works today.
+
+If this need becomes concrete, decide how independent audio coexists with the currently displayed page: whether playback should survive navigation, how it stops, where files live, and how volume and simultaneous sounds are controlled. A page's own audio may cover some cases, but that depends on the page and does not supply a general display-level command.
