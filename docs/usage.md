@@ -32,6 +32,6 @@ The API is designed for a trusted local network. The current Go server has no au
 
 ## Errors and persistence
 
-Invalid JSON, a missing URL, an empty HTML body, and oversized HTML produce API errors. A failed CDP navigation produces an HTTP 500; in HTML mode the file may already have been stored. The code does not replace a failed navigation with a dedicated “Page unavailable” screen or automatically retry it.
+Invalid JSON, a missing URL, an empty HTML body, and oversized HTML produce plain-text API errors with the control-page and endpoint addresses. `GET /display/content` already returns a local HTML status page linking to `/control` when no HTML has been uploaded (404) or the stored file cannot be accessed (500). The idle page at `/` also shows how to control the display. A failed CDP navigation produces an API HTTP 500; in HTML mode the file may already have been stored. For an unreachable external URL, the code does not intentionally navigate the kiosk to its local status page or automatically retry. What Chromium shows after such a failure depends on its navigation result.
 
 The stored HTML file survives a server restart when `/var/lib/html-display` is persistent. The server does **not** save the last requested URL, save which mode was active, or automatically restore the prior displayed page. On kiosk startup, Chromium should open the idle page at `/`. See [plans](roadmap.md) for the desired restoration behavior.
