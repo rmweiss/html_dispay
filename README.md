@@ -28,7 +28,22 @@ Uploaded HTML is stored at:
 
 The file is replaced atomically through a temporary file and rename. Only the current document is retained.
 
-The server attaches to an existing Chromium instance through CDP on `127.0.0.1:9222`.
+By default, the server attaches to an existing Chromium instance through CDP on `127.0.0.1:9222`, which is the appliance mode used on the display machine.
+
+For local development, the server can instead launch and control its own windowed Chromium instance:
+
+```bash
+go run . --launch-browser
+```
+
+or, with a built binary:
+
+```bash
+./html-display-server --launch-browser
+```
+
+In this mode Chromium is launched through chromedp, is not fullscreen/kiosked, and opens the local landing page after the HTTP server starts. The default mode remains unchanged so a missing kiosk browser is still treated as an error on the appliance.
+
 
 ## Examples
 
@@ -47,6 +62,10 @@ curl -X POST http://html-display:8080/api/display/html \
   -H 'Content-Type: text/html; charset=utf-8' \
   --data-binary @page.html
 ```
+
+## Local development note
+
+The browser launch mode only changes how Chromium is started. HTML uploads still use the normal persistent path `/var/lib/html-display/current.html`, so that directory must exist and be writable if you want to test HTML uploads outside the NixOS service environment.
 
 ## Build
 
