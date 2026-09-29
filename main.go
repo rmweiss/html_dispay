@@ -165,10 +165,15 @@ func main() {
 		Handler: mux,
 	}
 
+	listener, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		log.Fatalf("could not listen on %s: %v", listenAddr, err)
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
 		log.Printf("listening on %s", listenAddr)
-		errCh <- httpServer.ListenAndServe()
+		errCh <- httpServer.Serve(listener)
 	}()
 
 	if *launchLocalBrowser {
