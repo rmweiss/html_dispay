@@ -5,16 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
-
-	"github.com/chromedp/cdproto/network"
-	"github.com/chromedp/cdproto/target"
-	"github.com/chromedp/chromedp"
 )
 
 const (
@@ -135,61 +132,24 @@ func (s *Server) displayContent(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, s.contentFile)
 }
 
-func connectToKiosk() (context.Context, context.CancelFunc, context.CancelFunc) {
-	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), chromeDebugURL)
-	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
-
-	if err := chromedp.Run(browserCtx); err != nil {
-		browserCancel()
-		allocCancel()
-		log.Fatalf("could not connect to Chromium: %v", err)
-	}
-
-	targets, err := chromedp.Targets(browserCtx)
-	if err != nil {
-		browserCancel()
-		allocCancel()
-		log.Fatalf("could not get Chromium targets: %v", err)
-	}
-
-	var kioskTarget target.ID
-	for _, t := range targets {
-		if t.Type != "page" {
-			continue
-		}
-		log.Printf("found page: %s (%s)", t.Title, t.URL)
-		if t.URL == kioskStartURL {
-			kioskTarget = t.TargetID
-			break
-		}
-	}
-	if kioskTarget == "" {
-		browserCancel()
-		allocCancel()
-		log.Fatal("could not find kiosk browser target")
-	}
-
-	log.Printf("using kiosk target %s", kioskTarget)
-	chromeCtx, chromeCancel := chromedp.NewContext(browserCtx, chromedp.WithTargetID(kioskTarget))
-
-	if err := chromedp.Run(chromeCtx, network.SetCacheDisabled(true)); err != nil {
-		chromeCancel()
-		browserCancel()
-		allocCancel()
-		log.Fatalf("could not disable browser cache: %v", err)
-	}
-
-	cleanupBrowser := func() {
-		browserCancel()
-		allocCancel()
-	}
-	return chromeCtx, chromeCancel, cleanupBrowser
-}
-
 func main() {
-	chromeCtx, chromeCancel, cleanupBrowser := connectToKiosk()
-	defer chromeCancel()
-	defer cleanupBrowser()
+	launchLocalBrowser := flag.Bool(
+		"launch-browser",
+		false,
+		"launch a windowed local Chromium instance instead of attaching to the kiosk browser",
+	)
+	flag.Parse()
+
+	log.Printf("browser mode: %s", browserModeDescription(*launchLocalBrowser))
+
+	var chromeCtx context.Context
+	var cleanup func()
+	if *launchLocalBrowser {
+		chromeCtx, cleanup = launchBrowser()
+	} else {
+		chromeCtx, cleanup = connectToKiosk()
+	}
+	defer cleanup()
 
 	server := &Server{chromeCtx: chromeCtx, contentFile: contentFile}
 
@@ -200,6 +160,24 @@ func main() {
 	mux.HandleFunc("POST /api/display/html", server.displayHTML)
 	mux.HandleFunc("GET /display/content", server.displayContent)
 
-	log.Printf("listening on %s", listenAddr)
-	log.Fatal(http.ListenAndServe(listenAddr, mux))
+	httpServer := &http.Server{
+		Addr:    listenAddr,
+		Handler: mux,
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		log.Printf("listening on %s", listenAddr)
+		errCh <- httpServer.ListenAndServe()
+	}()
+
+	if *launchLocalBrowser {
+		if err := server.navigate(kioskStartURL); err != nil {
+			log.Fatalf("could not open landing page in launched browser: %v", err)
+		}
+	}
+
+	if err := <-errCh; err != nil && err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
 }
