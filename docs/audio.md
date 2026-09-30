@@ -6,9 +6,9 @@ HTML Display hosts the Chromium kiosk; it does not interpret Scene Composer scen
 
 ## Scene audio stays inside Chromium
 
-The [Scene Composer audio design](https://github.com/rmweiss/scene_composer/blob/main/docs/audio.md) is unimplemented. It specifies one shared browser Web Audio `AudioContext`: source gains feed background and effects buses, then a master gain. Loops, overlapping effects, future ducking/fades, and any future routed video audio belong to that graph. Scene Composer's server owns desired scene state and effect commands; each display's browser produces its own sound, without synchronized playback clocks.
+The [Scene Composer audio design](https://github.com/rmweiss/scene_composer/blob/main/docs/audio.md) has an implemented browser mixer and effect-trigger API. Ducking and video soundtrack routing remain future work. It uses one shared browser Web Audio `AudioContext`: source gains feed background and effects buses, then a master gain. Loops, overlapping effects, future ducking/fades, and any future routed video audio belong to that graph. Scene Composer's server owns desired scene state and effect commands; each display's browser produces its own sound, without synchronized playback clocks.
 
-The proposed effect trigger belongs to **Scene Composer**, not HTML Display:
+The effect trigger belongs to **Scene Composer**, not HTML Display:
 
 ```http
 POST /api/scenes/{scene}/instances/{instance}/audio/effects/{effect}/play
