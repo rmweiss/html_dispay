@@ -1,12 +1,12 @@
 # Audio and Scene Composer
 
-HTML Display is the kiosk host. It navigates Chromium to a URL or serves a complete uploaded HTML page; it does not interpret scene definitions or mix audio. The [Scene Composer audio design](https://github.com/rmweiss/scene_composer/blob/main/docs/audio.md) is the current design direction for scene audio. Scene Composer's audio API is itself planned, not implemented on its current main branch.
+HTML Display is the kiosk host. It navigates Chromium to a URL or serves a complete uploaded HTML page; it does not interpret scene definitions or mix audio. The [Scene Composer audio design](https://github.com/rmweiss/scene_composer/blob/main/docs/audio.md) is the current design direction for scene audio. Scene Composer's browser mixer and effect-trigger API are implemented on its current main branch; ducking and video soundtrack routing remain future work.
 
 ## Normal path: Scene Composer
 
-Audio should nearly always go through Scene Composer at the current stage of both projects. When Scene Composer is displayed on the kiosk, its browser player will own playback through one Web Audio `AudioContext`, with source gains, background/effects buses, and a master gain. Scene Composer's server owns the desired logical audio state and accepts effect triggers on a scene instance. The browser on each display produces its own sound. Background tracks start with an active instance and can loop; effects play only on command, and repeated triggers may overlap. Shared scene state does not imply synchronized playback clocks across displays.
+Audio should nearly always go through Scene Composer at the current stage of both projects. When Scene Composer is displayed on the kiosk, its browser player owns playback through one Web Audio `AudioContext`, with source gains, background/effects buses, and a master gain. Scene Composer's server owns the desired logical audio state and accepts effect triggers on a scene instance. The browser on each display produces its own sound. Background tracks start with an active instance and can loop; effects play only on command, and repeated triggers may overlap. Shared scene state does not imply synchronized playback clocks across displays.
 
-The proposed trigger is on **Scene Composer**, not HTML Display:
+The effect trigger is on **Scene Composer**, not HTML Display:
 
 ```http
 POST /api/scenes/{scene}/instances/{instance}/audio/effects/{effect}/play
