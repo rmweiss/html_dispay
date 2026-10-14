@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -14,6 +15,7 @@ import (
 const (
 	mqttQoS     byte = 1
 	mqttIPTopic      = "html-display/network/ip"
+	mqttHADiscovery = "homeassistant/device/html-display/config"
 )
 
 type mqttController struct {
@@ -49,6 +51,10 @@ func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttContr
 			}
 		}
 
+		if err := publishHomeAssistantDiscovery(client, pageTopic); err != nil {
+			log.Printf("could not publish Home Assistant discovery: %v", err)
+		}
+
 		token := client.Subscribe(pageTopic, mqttQoS, func(_ mqtt.Client, message mqtt.Message) {
 			url := strings.TrimSpace(string(message.Payload()))
 			if url == "" {
@@ -81,6 +87,45 @@ func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttContr
 	}
 
 	return controller, nil
+}
+
+
+func publishHomeAssistantDiscovery(client mqtt.Client, pageTopic string) error {
+	payload := map[string]any{
+		"dev": map[string]any{
+			"ids":  "html-display",
+			"name": "HTML Display",
+		},
+		"cmps": map[string]any{
+			"url": map[string]any{
+				"p":             "text",
+				"name":          "URL",
+				"unique_id":     "html_display_url",
+				"command_topic": pageTopic,
+				"state_topic":   pageTopic,
+				"retain":        true,
+			},
+			"ip": map[string]any{
+				"p":               "sensor",
+				"name":            "IP Address",
+				"unique_id":       "html_display_ip",
+				"state_topic":     mqttIPTopic,
+				"entity_category": "diagnostic",
+			},
+		},
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	token := client.Publish(mqttHADiscovery, mqttQoS, true, body)
+	if token.Wait() && token.Error() != nil {
+		return token.Error()
+	}
+	log.Printf("published retained Home Assistant discovery to %s", mqttHADiscovery)
+	return nil
 }
 
 func localIPv4ForBroker(broker string) (string, error) {
