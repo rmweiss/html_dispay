@@ -92,6 +92,9 @@ func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttContr
 
 func publishHomeAssistantDiscovery(client mqtt.Client, pageTopic string) error {
 	payload := map[string]any{
+		"o": map[string]any{
+			"name": "html-display",
+		},
 		"dev": map[string]any{
 			"ids":  "html-display",
 			"name": "HTML Display",
