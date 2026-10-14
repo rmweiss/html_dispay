@@ -29,6 +29,7 @@ const (
 type Server struct {
 	chromeCtx   context.Context
 	contentFile string
+	mqtt        *mqttController
 }
 
 type displayURLRequest struct {
@@ -38,6 +39,18 @@ type displayURLRequest struct {
 func (s *Server) navigate(url string) error {
 	log.Printf("navigating to %s", url)
 	return chromedp.Run(s.chromeCtx, chromedp.Navigate(url))
+}
+
+func (s *Server) setPage(url string, persist bool) error {
+	if err := s.navigate(url); err != nil {
+		return err
+	}
+	if persist && s.mqtt != nil {
+		if err := s.mqtt.publishPage(url); err != nil {
+			return fmt.Errorf("page displayed, but MQTT persistence failed: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Server) displayURL(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +63,7 @@ func (s *Server) displayURL(w http.ResponseWriter, r *http.Request) {
 		s.writeAPIError(w, r, http.StatusBadRequest, "url is required")
 		return
 	}
-	if err := s.navigate(req.URL); err != nil {
+	if err := s.setPage(req.URL, true); err != nil {
 		log.Printf("navigation failed: %v", err)
 		s.writeAPIError(w, r, http.StatusInternalServerError, fmt.Sprintf("could not display URL %q: %v", req.URL, err))
 		return
@@ -141,6 +154,16 @@ func main() {
 		false,
 		"launch a windowed local Chromium instance instead of attaching to the kiosk browser",
 	)
+	mqttBroker := flag.String(
+		"mqtt-broker",
+		"",
+		"MQTT broker URL (for example tcp://192.168.1.10:1883); empty disables MQTT",
+	)
+	mqttPageTopic := flag.String(
+		"mqtt-page-topic",
+		"html-display/display/url",
+		"retained MQTT topic containing the desired page URL",
+	)
 	flag.Parse()
 
 	log.Printf("browser mode: %s", browserModeDescription(*launchLocalBrowser))
@@ -183,6 +206,17 @@ func main() {
 		if err := server.navigate(kioskStartURL); err != nil {
 			log.Fatalf("could not open landing page in launched browser: %v", err)
 		}
+	}
+
+	if *mqttBroker != "" {
+		mqttCtl, err := startMQTT(*mqttBroker, *mqttPageTopic, func(url string) error {
+			return server.setPage(url, false)
+		})
+		if err != nil {
+			log.Fatalf("could not start MQTT: %v", err)
+		}
+		server.mqtt = mqttCtl
+		defer mqttCtl.close()
 	}
 
 	if err := <-errCh; err != nil && err != http.ErrServerClosed {
