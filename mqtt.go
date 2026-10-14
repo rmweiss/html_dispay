@@ -37,6 +37,18 @@ func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttContr
 
 	opts.OnConnect = func(client mqtt.Client) {
 		log.Printf("MQTT connected to %s", broker)
+
+		if ip, err := localIPv4ForBroker(broker); err != nil {
+			log.Printf("could not determine local IP for MQTT metadata: %v", err)
+		} else {
+			token := client.Publish(mqttIPTopic, mqttQoS, true, ip)
+			if token.Wait() && token.Error() != nil {
+				log.Printf("could not publish MQTT IP address: %v", token.Error())
+			} else {
+				log.Printf("published retained MQTT IP address %s to %s", ip, mqttIPTopic)
+			}
+		}
+
 		token := client.Subscribe(pageTopic, mqttQoS, func(_ mqtt.Client, message mqtt.Message) {
 			url := strings.TrimSpace(string(message.Payload()))
 			if url == "" {
@@ -66,17 +78,6 @@ func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttContr
 	token := client.Connect()
 	if token.Wait() && token.Error() != nil {
 		return nil, token.Error()
-	}
-
-	if ip, err := localIPv4ForBroker(broker); err != nil {
-		log.Printf("could not determine local IP for MQTT metadata: %v", err)
-	} else {
-		token := client.Publish(mqttIPTopic, mqttQoS, true, ip)
-		if token.Wait() && token.Error() != nil {
-			log.Printf("could not publish MQTT IP address: %v", token.Error())
-		} else {
-			log.Printf("published retained MQTT IP address %s to %s", ip, mqttIPTopic)
-		}
 	}
 
 	return controller, nil
