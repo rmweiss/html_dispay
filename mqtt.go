@@ -3,13 +3,18 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
-const mqttQoS byte = 1
+const (
+	mqttQoS     byte = 1
+	mqttIPTopic      = "html-display/network/ip"
+)
 
 type mqttController struct {
 	client    mqtt.Client
@@ -63,7 +68,45 @@ func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttContr
 		return nil, token.Error()
 	}
 
+	if ip, err := localIPv4ForBroker(broker); err != nil {
+		log.Printf("could not determine local IP for MQTT metadata: %v", err)
+	} else {
+		token := client.Publish(mqttIPTopic, mqttQoS, true, ip)
+		if token.Wait() && token.Error() != nil {
+			log.Printf("could not publish MQTT IP address: %v", token.Error())
+		} else {
+			log.Printf("published retained MQTT IP address %s to %s", ip, mqttIPTopic)
+		}
+	}
+
 	return controller, nil
+}
+
+func localIPv4ForBroker(broker string) (string, error) {
+	u, err := url.Parse(broker)
+	if err != nil {
+		return "", err
+	}
+
+	host := u.Host
+	if host == "" {
+		return "", fmt.Errorf("MQTT broker URL has no host")
+	}
+	if _, _, err := net.SplitHostPort(host); err != nil {
+		host = net.JoinHostPort(u.Hostname(), "1883")
+	}
+
+	conn, err := net.Dial("udp4", host)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+
+	local, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok || local.IP == nil {
+		return "", fmt.Errorf("could not determine local IPv4 address")
+	}
+	return local.IP.String(), nil
 }
 
 func (m *mqttController) publishPage(url string) error {
