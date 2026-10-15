@@ -13,14 +13,17 @@ import (
 )
 
 const (
-	mqttQoS     byte = 1
-	mqttIPTopic      = "html-display/network/ip"
-	mqttHADiscovery = "homeassistant/device/html-display/config"
+	mqttQoS            byte = 1
+	mqttIPTopic             = "html-display/network/ip"
+	mqttHeartbeatTopic      = "html-display/status/heartbeat"
+	mqttHADiscovery         = "homeassistant/device/html-display/config"
+	mqttHeartbeatInterval   = 5 * time.Second
 )
 
 type mqttController struct {
-	client    mqtt.Client
-	pageTopic string
+	client        mqtt.Client
+	pageTopic     string
+	heartbeatStop chan struct{}
 }
 
 func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttController, error) {
@@ -28,7 +31,10 @@ func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttContr
 		return nil, fmt.Errorf("MQTT page topic must not be empty")
 	}
 
-	controller := &mqttController{pageTopic: pageTopic}
+	controller := &mqttController{
+		pageTopic:     pageTopic,
+		heartbeatStop: make(chan struct{}),
+	}
 
 	opts := mqtt.NewClientOptions().
 		AddBroker(broker).
@@ -86,9 +92,35 @@ func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttContr
 		return nil, token.Error()
 	}
 
+	go controller.runHeartbeat()
+
 	return controller, nil
 }
 
+func (m *mqttController) runHeartbeat() {
+	publish := func() {
+		if !m.client.IsConnected() {
+			return
+		}
+		token := m.client.Publish(mqttHeartbeatTopic, mqttQoS, false, "ON")
+		if token.Wait() && token.Error() != nil {
+			log.Printf("could not publish MQTT heartbeat: %v", token.Error())
+		}
+	}
+
+	publish()
+	ticker := time.NewTicker(mqttHeartbeatInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			publish()
+		case <-m.heartbeatStop:
+			return
+		}
+	}
+}
 
 func publishHomeAssistantDiscovery(client mqtt.Client, pageTopic string) error {
 	payload := map[string]any{
@@ -113,6 +145,15 @@ func publishHomeAssistantDiscovery(client mqtt.Client, pageTopic string) error {
 				"name":            "IP Address",
 				"unique_id":       "html_display_ip",
 				"state_topic":     mqttIPTopic,
+				"entity_category": "diagnostic",
+			},
+			"online": map[string]any{
+				"p":               "binary_sensor",
+				"name":            "Online",
+				"unique_id":       "html_display_online",
+				"state_topic":     mqttHeartbeatTopic,
+				"payload_on":      "ON",
+				"expire_after":    15,
 				"entity_category": "diagnostic",
 			},
 		},
@@ -171,5 +212,6 @@ func (m *mqttController) close() {
 	if m == nil || m.client == nil {
 		return
 	}
+	close(m.heartbeatStop)
 	m.client.Disconnect(250)
 }
