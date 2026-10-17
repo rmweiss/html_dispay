@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/chromedp/chromedp"
 )
@@ -27,7 +29,10 @@ const (
 )
 
 type Server struct {
+	chromeMu    sync.Mutex // serializes navigation and CDP reconnection
 	chromeCtx   context.Context
+	chromeClose func()
+	launchMode  bool
 	contentFile string
 	mqtt        *mqttController
 }
@@ -36,8 +41,41 @@ type displayURLRequest struct {
 	URL string `json:"url"`
 }
 
+// reconnectKiosk must be called with chromeMu held.
+func (s *Server) reconnectKiosk() error {
+	log.Printf("reconnecting to Chromium kiosk target")
+	ctx, closeFn, err := connectToKiosk()
+	if err != nil {
+		return fmt.Errorf("reconnect to Chromium failed: %w", err)
+	}
+	if s.chromeClose != nil {
+		s.chromeClose()
+	}
+	s.chromeCtx = ctx
+	s.chromeClose = closeFn
+	log.Printf("reconnected to Chromium kiosk target")
+	return nil
+}
+
 func (s *Server) navigate(url string) error {
+	s.chromeMu.Lock()
+	defer s.chromeMu.Unlock()
+
 	log.Printf("navigating to %s", url)
+	if !s.launchMode && s.chromeCtx.Err() != nil {
+		if err := s.reconnectKiosk(); err != nil {
+			return err
+		}
+	}
+	err := chromedp.Run(s.chromeCtx, chromedp.Navigate(url))
+	if err == nil || s.launchMode || (!errors.Is(err, context.Canceled) && s.chromeCtx.Err() == nil) {
+		return err
+	}
+	log.Printf("browser context canceled during navigation: %v", err)
+	if reconnectErr := s.reconnectKiosk(); reconnectErr != nil {
+		return fmt.Errorf("navigation failed (%v); %w", err, reconnectErr)
+	}
+	log.Printf("retrying navigation to %s after reconnect", url)
 	return chromedp.Run(s.chromeCtx, chromedp.Navigate(url))
 }
 
@@ -173,11 +211,24 @@ func main() {
 	if *launchLocalBrowser {
 		chromeCtx, cleanup = launchBrowser()
 	} else {
-		chromeCtx, cleanup = connectToKiosk()
+		var err error
+		chromeCtx, cleanup, err = connectToKiosk()
+		if err != nil {
+			log.Fatalf("could not connect to kiosk: %v", err)
+		}
 	}
-	defer cleanup()
 
-	server := &Server{chromeCtx: chromeCtx, contentFile: contentFile}
+	server := &Server{
+		chromeCtx: chromeCtx, chromeClose: cleanup,
+		launchMode: *launchLocalBrowser, contentFile: contentFile,
+	}
+	defer func() {
+		server.chromeMu.Lock()
+		defer server.chromeMu.Unlock()
+		if server.chromeClose != nil {
+			server.chromeClose()
+		}
+	}()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", server.landingPage)
