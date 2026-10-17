@@ -28,6 +28,8 @@ func connectToKiosk() (context.Context, func()) {
 	}
 
 	var kioskTarget target.ID
+	var navigatedTarget target.ID
+	var navigatedCount int
 	for _, t := range targets {
 		if t.Type != "page" {
 			continue
@@ -37,11 +39,22 @@ func connectToKiosk() (context.Context, func()) {
 			kioskTarget = t.TargetID
 			break
 		}
+		if t.URL != "" && t.URL != "about:blank" {
+			navigatedTarget = t.TargetID
+			navigatedCount++
+		}
+	}
+	// The kiosk tab no longer has its startup URL after navigation.
+	// Recover only when there is exactly one nonblank page, so we do
+	// not inadvertently take control of an unrelated Chromium tab.
+	if kioskTarget == "" && navigatedCount == 1 {
+		kioskTarget = navigatedTarget
+		log.Printf("recovered navigated kiosk target %s", kioskTarget)
 	}
 	if kioskTarget == "" {
 		browserCancel()
 		allocCancel()
-		log.Fatal("could not find kiosk browser target")
+		log.Fatalf("could not find kiosk browser target (nonblank candidates: %d)", navigatedCount)
 	}
 
 	log.Printf("using kiosk target %s", kioskTarget)
