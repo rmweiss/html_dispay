@@ -13,6 +13,15 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
+// devtoolsPage describes the /json/list response, whose "id" field differs
+// from the CDP TargetInfo "targetId" field.
+type devtoolsPage struct {
+	ID    target.ID `json:"id"`
+	Type  string    `json:"type"`
+	Title string    `json:"title"`
+	URL   string    `json:"url"`
+}
+
 func connectToKiosk() (context.Context, func()) {
 	// Discover the existing target over HTTP before creating any chromedp
 	// context. Running an unbound context creates an unwanted blank tab.
@@ -26,7 +35,7 @@ func connectToKiosk() (context.Context, func()) {
 		log.Fatalf("could not list Chromium targets: HTTP %s", resp.Status)
 	}
 
-	var targets []*target.Info
+	var targets []devtoolsPage
 	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
 		log.Fatalf("could not decode Chromium targets: %v", err)
 	}
@@ -40,11 +49,11 @@ func connectToKiosk() (context.Context, func()) {
 		}
 		log.Printf("found page: %s (%s)", t.Title, t.URL)
 		if t.URL == kioskStartURL {
-			kioskTarget = t.TargetID
+			kioskTarget = t.ID
 			break
 		}
 		if t.URL != "" && t.URL != "about:blank" {
-			navigatedTarget = t.TargetID
+			navigatedTarget = t.ID
 			navigatedCount++
 		}
 	}
