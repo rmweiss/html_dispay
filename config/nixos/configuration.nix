@@ -4,6 +4,7 @@
 {
   imports = [
     ./hardware-configuration.nix
+    ./modules/cec.nix
   ];
 
   # Boot loader
