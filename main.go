@@ -202,8 +202,14 @@ func main() {
 		"html-display/display/url",
 		"retained MQTT topic containing the desired page URL",
 	)
+	showVersion := flag.Bool("version", false, "print build information and exit")
 	flag.Parse()
 
+	if *showVersion {
+		fmt.Println(versionInfo())
+		return
+	}
+	log.Print(versionInfo())
 	log.Printf("browser mode: %s", browserModeDescription(*launchLocalBrowser))
 
 	var chromeCtx context.Context
