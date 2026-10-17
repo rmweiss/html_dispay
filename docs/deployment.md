@@ -8,6 +8,26 @@ It imports `./hardware-configuration.nix`, which is generated for the machine an
 
 The configuration enables OpenSSH with password authentication and `PermitRootLogin = "yes"`, as used on this LAN appliance. It opens the SSH firewall port and TCP 8080. The Go server listens on all interfaces on port 8080; keep network exposure within the intended trusted LAN. Chromium's CDP port 9222 is used locally and is not opened in the NixOS firewall. The config starts Chromium with `--remote-debugging-port=9222`; the Go server connects to `127.0.0.1:9222`.
 
+## TV power and HDMI-CEC
+
+The optional [CEC module](../config/nixos/modules/cec.nix) uses the Pulse-Eight USB-CEC Adapter v2, detected on this machine as `/dev/serial/by-id/usb-Pulse-Eight_USB-CEC_Adapter_v2_r8-if00`. It uses libCEC and does **not** require a kernel `/dev/cecX` device; the separate Intel DisplayPort CEC interface was detected but did not successfully communicate with the TV.
+
+The module installs `display-tv` with commands `on`, `off`, `status`, `active`, `scan`, `volume-up`, `volume-down`, `mute`, and `volume-status`. For example:
+
+```sh
+display-tv off
+display-tv on
+display-tv status
+```
+
+The administrator needs membership in `dialout` for the USB serial device; the module adds that group to `admin`. Log out and back in after enabling it. The command is independent of the browser, REST server and Squeezelite; no TV endpoints have been added to the Go API.
+
+A systemd `system-sleep` hook sends `standby 0` before system suspend and `on 0` after resume, with a two-second post-resume delay and ten-second command timeout. This is a **best-effort policy**, not a way to wake the N100 from the TV. Power control via the Pulse-Eight adapter was manually reported working; the suspend/resume hook has **not yet been tested** on the appliance. Hooks run as root, and the timeout prevents an unresponsive adapter from indefinitely blocking the sleep transition. The hook does not act on reboot, shutdown, or Chromium restarts.
+
+CEC volume status may return `7f` (unknown) when the TV uses built-in speakers, as observed here. The intended audio design is to keep the TV's speaker volume at a fixed level and adjust Linux/PipeWire audio output instead. CEC volume commands remain available as optional controls.
+
+To apply, install the [checked-in machine config](../config/nixos/configuration.nix) at `/etc/nixos/configuration.nix`, the CEC module at `/etc/nixos/modules/cec.nix`, and run `sudo nixos-rebuild switch`. Check the USB device symlink on other machines and change `cecDevice` accordingly. Test `display-tv off` / `display-tv on` before testing `systemctl suspend`.
+
 ## Build and startup
 
 Build the Go 1.24 module:
