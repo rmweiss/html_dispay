@@ -3,6 +3,7 @@
 HTML Display is a small Go control server for an existing Chromium kiosk tab. It accepts a URL or a complete HTML document over the local network and replaces the visible page.
 
 - [Using the display](usage.md) — endpoints, examples, and current behavior
+- [TV control with HDMI-CEC](deployment.md#tv-power-and-hdmi-cec) — Pulse-Eight adapter, commands, and suspend/resume integration
 - [Kiosk deployment](deployment.md) — the tested NixOS setup and what must be supplied outside this repository
 - [Audio and Scene Composer](audio.md) — working Music Assistant/Squeezelite integration, browser priority, limitations, and planned mpv takeover
 - [Temporary mpv takeover: first concept](mpv-takeover-concept.md) — proposed mpv playback and return to Chromium; not implemented
