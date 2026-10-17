@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"time"
 
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/target"
@@ -11,20 +14,21 @@ import (
 )
 
 func connectToKiosk() (context.Context, func()) {
-	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), chromeDebugURL)
-	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
-
-	if err := chromedp.Run(browserCtx); err != nil {
-		browserCancel()
-		allocCancel()
-		log.Fatalf("could not connect to Chromium: %v", err)
+	// Discover the existing target over HTTP before creating any chromedp
+	// context. Running an unbound context creates an unwanted blank tab.
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(chromeDebugURL + "/json/list")
+	if err != nil {
+		log.Fatalf("could not list Chromium targets: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Fatalf("could not list Chromium targets: HTTP %s", resp.Status)
 	}
 
-	targets, err := chromedp.Targets(browserCtx)
-	if err != nil {
-		browserCancel()
-		allocCancel()
-		log.Fatalf("could not get Chromium targets: %v", err)
+	var targets []*target.Info
+	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
+		log.Fatalf("could not decode Chromium targets: %v", err)
 	}
 
 	var kioskTarget target.ID
@@ -44,32 +48,25 @@ func connectToKiosk() (context.Context, func()) {
 			navigatedCount++
 		}
 	}
-	// The kiosk tab no longer has its startup URL after navigation.
-	// Recover only when there is exactly one nonblank page, so we do
-	// not inadvertently take control of an unrelated Chromium tab.
 	if kioskTarget == "" && navigatedCount == 1 {
 		kioskTarget = navigatedTarget
 		log.Printf("recovered navigated kiosk target %s", kioskTarget)
 	}
 	if kioskTarget == "" {
-		browserCancel()
-		allocCancel()
 		log.Fatalf("could not find kiosk browser target (nonblank candidates: %d)", navigatedCount)
 	}
 
 	log.Printf("using kiosk target %s", kioskTarget)
-	chromeCtx, chromeCancel := chromedp.NewContext(browserCtx, chromedp.WithTargetID(kioskTarget))
-
+	allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), chromeDebugURL)
+	chromeCtx, chromeCancel := chromedp.NewContext(allocCtx, chromedp.WithTargetID(kioskTarget))
 	if err := chromedp.Run(chromeCtx, network.SetCacheDisabled(true)); err != nil {
 		chromeCancel()
-		browserCancel()
 		allocCancel()
-		log.Fatalf("could not disable browser cache: %v", err)
+		log.Fatalf("could not attach to kiosk target: %v", err)
 	}
 
 	cleanup := func() {
 		chromeCancel()
-		browserCancel()
 		allocCancel()
 	}
 	return chromeCtx, cleanup
