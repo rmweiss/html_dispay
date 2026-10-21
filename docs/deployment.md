@@ -8,6 +8,37 @@ It imports `./hardware-configuration.nix`, which is generated for the machine an
 
 The configuration enables OpenSSH with password authentication and `PermitRootLogin = "yes"`, as used on this LAN appliance. It opens the SSH firewall port and TCP 8080. The Go server listens on all interfaces on port 8080; keep network exposure within the intended trusted LAN. Chromium's CDP port 9222 is used locally and is not opened in the NixOS firewall. The config starts Chromium with `--remote-debugging-port=9222`; the Go server connects to `127.0.0.1:9222`.
 
+## Kiosk VT ownership and rebuild safety (do not remove)
+
+**Why this matters:** This appliance launches Sway directly through `html-display-sway.service` on `/dev/tty1`, rather than through a conventional display manager. The Sway unit explicitly `Conflicts=` with `getty@tty1.service`. The HTML Display Go server has `Requires=` and `PartOf=` relationships with Sway. If systemd starts the tty1 login prompt, it can stop Sway and consequently stop the Go server. During troubleshooting on October 21, 2026, `nixos-rebuild switch` reported starting `getty@tty1.service`, after which **both kiosk services were inactive** and the local display showed a text console.
+
+**Required settings** in [configuration.nix](../config/nixos/configuration.nix):
+
+```nix
+# tty1 is exclusively owned by Sway.
+systemd.services."getty@tty1".enable = false;
+systemd.services."autovt@tty1".enable = false;
+
+# Do not interrupt the kiosk for routine NixOS unit changes.
+systemd.services.html-display-sway.restartIfChanged = false;
+systemd.services.html-display-server.restartIfChanged = false;
+```
+
+Keep the Sway unit's `TTYPath = "/dev/tty1"` and `conflicts = [ "getty@tty1.service" ];` consistent with this policy. The active `graphical.target` and `multi-user.target` were not the cause; moving Sway between targets was **not** the verified solution. Disabling tty1 getty/autovt together with preserving both kiosk services was tested successfully with `nixos-rebuild switch`: Sway and server were both `active`, getty was `inactive`, and NixOS no longer started `getty@tty1.service`.
+
+**Tradeoff:** `restartIfChanged = false` prevents routine NixOS activation from automatically restarting these units when their definitions change. Changes to the Sway unit, Chromium startup options, or server unit may require an explicit controlled restart (or reboot). It does not turn off their `serviceConfig.Restart = "always"` crash recovery. It also does not prevent stops requested by other systemd dependencies. Keep other virtual terminals or SSH available for administration.
+
+**Regression check after changing NixOS services:**
+
+```sh
+sudo nixos-rebuild dry-activate
+sudo nixos-rebuild switch
+systemctl is-active html-display-sway html-display-server
+systemctl is-active getty@tty1.service
+```
+
+Expected: `active`, `active`, `inactive`. Neither kiosk unit should be stopped during a routine switch, and getty should not start on tty1. If the console reappears, inspect `journalctl -b -u html-display-sway -u html-display-server -u getty@tty1` and the rebuild's activation messages before changing the target or dependency layout. A full reboot with these particular settings had not yet been reported as tested when this note was written.
+
 ## TV power and HDMI-CEC
 
 The optional [CEC module](../config/nixos/modules/cec.nix) uses the Pulse-Eight USB-CEC Adapter v2, detected on this machine as `/dev/serial/by-id/usb-Pulse-Eight_USB-CEC_Adapter_v2_r8-if00`. It uses libCEC and does **not** require a kernel `/dev/cecX` device; the separate Intel DisplayPort CEC interface was detected but did not successfully communicate with the TV.
