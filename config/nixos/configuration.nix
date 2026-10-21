@@ -18,6 +18,14 @@
   # Basic system
   # ---------------------------------------------------------------------------
 
+  # tty1 belongs exclusively to the Sway kiosk.
+  systemd.services."getty@tty1".enable = false;
+  systemd.services."autovt@tty1".enable = false;
+
+  # Keep both kiosk processes running across routine rebuilds.
+  systemd.services.html-display-sway.restartIfChanged = false;
+  systemd.services.html-display-server.restartIfChanged = false;
+
   networking.hostName = "html-display";
   networking.networkmanager.enable = true;
   networking.firewall.allowedTCPPorts = [ 8080 ];
@@ -117,6 +125,7 @@
   '';
 
   systemd.services.html-display-sway = {
+    # restartIfChanged = false;
     description = "HTML Display Sway session";
 
     wantedBy = [ "graphical.target" ];
@@ -163,6 +172,8 @@
 
 
   systemd.services.html-display-server = {
+    # restartIfChanged = true;
+
     description = "HTML Display Control Server";
 
     wantedBy = [ "multi-user.target" ];
@@ -194,6 +205,10 @@
       RestartSec = "2s";
     };
   };
+
+
+  systemd.services.html-display-sway.restartIfChanged = false;
+  systemd.services.html-display-server.restartIfChanged = false;
 
 
   # ---------------------------------------------------------------------------
