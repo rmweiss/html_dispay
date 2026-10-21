@@ -18,11 +18,20 @@
   # Basic system
   # ---------------------------------------------------------------------------
 
-  # tty1 belongs exclusively to the Sway kiosk.
+  # IMPORTANT: tty1 is reserved for the Sway kiosk, not a login prompt.
+  # During nixos-rebuild switch, NixOS was starting getty@tty1. Because
+  # html-display-sway conflicts with getty@tty1, this stopped Sway and also
+  # stopped html-display-server (which has PartOf/Requires dependencies).
+  # The observed result was a text console and both kiosk units inactive.
+  # Do not re-enable either tty1 getty unit without redesigning tty ownership.
   systemd.services."getty@tty1".enable = false;
   systemd.services."autovt@tty1".enable = false;
 
-  # Keep both kiosk processes running across routine rebuilds.
+  # Preserve both kiosk services during routine NixOS configuration switches.
+  # Auto-restarting the services on unit changes interrupted the display;
+  # with restartIfChanged = false, manually restart/reboot when intentionally
+  # changing the kiosk units, Chromium command line, or server binary.
+  # This does NOT disable systemd's serviceConfig.Restart = "always" for crashes.
   systemd.services.html-display-sway.restartIfChanged = false;
   systemd.services.html-display-server.restartIfChanged = false;
 
@@ -125,7 +134,6 @@
   '';
 
   systemd.services.html-display-sway = {
-    # restartIfChanged = false;
     description = "HTML Display Sway session";
 
     wantedBy = [ "graphical.target" ];
@@ -172,7 +180,6 @@
 
 
   systemd.services.html-display-server = {
-    # restartIfChanged = true;
 
     description = "HTML Display Control Server";
 
@@ -205,10 +212,6 @@
       RestartSec = "2s";
     };
   };
-
-
-  systemd.services.html-display-sway.restartIfChanged = false;
-  systemd.services.html-display-server.restartIfChanged = false;
 
 
   # ---------------------------------------------------------------------------
