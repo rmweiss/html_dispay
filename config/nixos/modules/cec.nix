@@ -65,6 +65,28 @@ in
   # /dev/ttyACM* is generally root:dialout on this machine.
   users.users.admin.extraGroups = [ "dialout" ];
 
+  # Wake the TV once on boot, independently of kiosk and audio.
+  systemd.services.display-tv-boot = {
+    description = "Wake TV via Pulse-Eight HDMI-CEC on boot";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "systemd-udev-trigger.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = pkgs.writeShellScript "display-tv-boot" ''
+        # Allow udev time to enumerate the USB serial adapter.
+        for attempt in $(${pkgs.coreutils}/bin/seq 1 20); do
+          if [ -e "${cecDevice}" ]; then
+            exec ${displayTv}/bin/display-tv on
+          fi
+          ${pkgs.coreutils}/bin/sleep 1
+        done
+        echo "CEC adapter not found during boot: ${cecDevice}" >&2
+        exit 1
+      '';
+      TimeoutStartSec = "35s";
+    };
+  };
+
   # Executed by systemd before and after suspend.
   environment.etc."systemd/system-sleep/display-tv".source = tvSleepHook;
 }
