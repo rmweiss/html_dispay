@@ -22,11 +22,13 @@ display-tv status
 
 The administrator needs membership in `dialout` for the USB serial device; the module adds that group to `admin`. Log out and back in after enabling it. The command is independent of the browser, REST server and Squeezelite; no TV endpoints have been added to the Go API.
 
-A systemd `system-sleep` hook sends `standby 0` before system suspend and `on 0` after resume, with a two-second post-resume delay and ten-second command timeout. This is a **best-effort policy**, not a way to wake the N100 from the TV. Power control via the Pulse-Eight adapter was manually reported working; the suspend/resume hook has **not yet been tested** on the appliance. Hooks run as root, and the timeout prevents an unresponsive adapter from indefinitely blocking the sleep transition. The hook does not act on reboot, shutdown, or Chromium restarts.
+A separate `display-tv-boot.service` sends `on 0` once during boot. It waits up to 20 seconds for the Pulse-Eight USB serial device to appear; if unavailable, the service fails and logs the reason without making the kiosk or audio services depend on it. Inspect with `systemctl status display-tv-boot.service` and `journalctl -b -u display-tv-boot.service`.
+
+A systemd `system-sleep` hook sends `standby 0` before system suspend and `on 0` after resume, with a two-second post-resume delay and ten-second command timeout. This is a **best-effort policy**, not a way to wake the N100 from the TV. Power control via the Pulse-Eight adapter was manually reported working; the suspend/resume hook has **not yet been tested** on the appliance. Hooks run as root, and the timeout prevents an unresponsive adapter from indefinitely blocking the sleep transition. The hook does not act on reboot, shutdown, or Chromium restarts; boot-time power-on is handled by the separate service. Neither mechanism automatically powers down the TV at shutdown.
 
 CEC volume status may return `7f` (unknown) when the TV uses built-in speakers, as observed here. The intended audio design is to keep the TV's speaker volume at a fixed level and adjust Linux/PipeWire audio output instead. CEC volume commands remain available as optional controls.
 
-To apply, install the [checked-in machine config](../config/nixos/configuration.nix) at `/etc/nixos/configuration.nix`, the CEC module at `/etc/nixos/modules/cec.nix`, and run `sudo nixos-rebuild switch`. Check the USB device symlink on other machines and change `cecDevice` accordingly. Test `display-tv off` / `display-tv on` before testing `systemctl suspend`.
+To apply, install the [checked-in machine config](../config/nixos/configuration.nix) at `/etc/nixos/configuration.nix`, the CEC module at `/etc/nixos/modules/cec.nix`, and run `sudo nixos-rebuild switch`. Check the USB device symlink on other machines and change `cecDevice` accordingly. Test `display-tv off` / `display-tv on`, then `sudo systemctl start display-tv-boot.service` to test boot-time wake without rebooting. Test `systemctl suspend` separately. The boot service has not yet been tested on the appliance.
 
 ## Build and startup
 
