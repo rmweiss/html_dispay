@@ -48,7 +48,7 @@ func connectToKiosk() (context.Context, func(), error) {
 			continue
 		}
 		log.Printf("found page: %s (%s)", t.Title, t.URL)
-		if t.URL == kioskStartURL {
+		if t.URL == kioskStartupURL || t.URL == kioskStartURL {
 			kioskTarget = t.ID
 			break
 		}
