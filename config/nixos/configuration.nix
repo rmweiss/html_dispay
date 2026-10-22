@@ -104,6 +104,14 @@
     wrapperFeatures.gtk = false;
   };
 
+  # Local page is available even before the Go HTTP server is listening.
+  environment.etc."html-display/startup.html".text = ''
+    <!doctype html>
+    <html><head><meta charset="utf-8"><style>
+      html, body { margin: 0; width: 100%; height: 100%; background: #000; }
+    </style></head><body></body></html>
+  '';
+
   environment.etc."html-display/sway.conf".text = ''
     # No normal desktop chrome.
     default_border none
@@ -124,7 +132,7 @@
       --disable-session-crashed-bubble \
       --autoplay-policy=no-user-gesture-required \
       --remote-debugging-port=9222 \
-      http://127.0.0.1:8080/
+      file:///etc/html-display/startup.html
 
     # Chromium should occupy the entire output even if Chromium itself
     # doesn't request fullscreen correctly.
