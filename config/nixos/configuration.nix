@@ -212,7 +212,7 @@
       User = "display";
       Group = "users";
 
-      ExecStart = "/opt/html-display/html-display-server";
+      ExecStart = "/opt/html-display/html-display-server -mqtt-broker tcp://192.168.10.12:1883";
 
       StateDirectory = "html-display";
 
