@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/chromedp/chromedp"
 )
@@ -23,6 +24,7 @@ const (
 	listenAddr     = ":8080"
 	chromeDebugURL = "http://127.0.0.1:9222"
 	kioskStartURL  = "http://127.0.0.1:8080/"
+	kioskStartupURL = "file:///etc/html-display/startup.html"
 	contentURL     = "http://127.0.0.1:8080/display/content"
 	contentFile    = "/var/lib/html-display/current.html"
 	maxHTMLSize    = 10 * 1024 * 1024
@@ -77,6 +79,23 @@ func (s *Server) navigate(url string) error {
 	}
 	log.Printf("retrying navigation to %s after reconnect", url)
 	return chromedp.Run(s.chromeCtx, chromedp.Navigate(url))
+}
+
+// showLandingIfStartup never overrides a page already selected by MQTT or REST.
+func (s *Server) showLandingIfStartup() error {
+	s.chromeMu.Lock()
+	defer s.chromeMu.Unlock()
+
+	var currentURL string
+	if err := chromedp.Run(s.chromeCtx, chromedp.Location(&currentURL)); err != nil {
+		return fmt.Errorf("could not inspect kiosk URL: %w", err)
+	}
+	if currentURL != kioskStartupURL {
+		log.Printf("leaving existing kiosk page unchanged: %s", currentURL)
+		return nil
+	}
+	log.Print("no page selected yet; showing default landing page")
+	return chromedp.Run(s.chromeCtx, chromedp.Navigate(kioskStartURL))
 }
 
 func (s *Server) setPage(url string, persist bool) error {
@@ -263,6 +282,15 @@ func main() {
 		if err := server.navigate(kioskStartURL); err != nil {
 			log.Fatalf("could not open landing page in launched browser: %v", err)
 		}
+	} else {
+		// Give the retained MQTT URL a chance to arrive before showing the
+		// default page. Never override an already-selected destination.
+		go func() {
+			time.Sleep(3 * time.Second)
+			if err := server.showLandingIfStartup(); err != nil {
+				log.Printf("could not show default landing page: %v", err)
+			}
+		}()
 	}
 
 	if *mqttBroker != "" {
