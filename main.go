@@ -100,6 +100,9 @@ func (s *Server) showLandingIfStartup() error {
 }
 
 func (s *Server) setPage(url string, persist bool) error {
+	if err := reachableHTTPURL(url); err != nil {
+		return fmt.Errorf("URL is not reachable: %w", err)
+	}
 	if err := s.navigate(url); err != nil {
 		return err
 	}
@@ -168,7 +171,7 @@ func (s *Server) setMQTTPage(url string) error {
 		log.Printf("MQTT URL %q is not reachable: %v; no usable page is active, showing default page", url, err)
 		return s.navigate(kioskStartURL)
 	}
-	return s.setPage(url, false)
+	return s.navigate(url)
 }
 
 func (s *Server) displayURL(w http.ResponseWriter, r *http.Request) {
