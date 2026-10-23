@@ -110,6 +110,32 @@ func (s *Server) setPage(url string, persist bool) error {
 	return nil
 }
 
+func reachableHTTPURL(rawURL string) error {
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return err
+	}
+	if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+		return fmt.Errorf("unsupported URL scheme %q", req.URL.Scheme)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
+func (s *Server) setMQTTPage(url string) error {
+	if err := reachableHTTPURL(url); err != nil {
+		log.Printf("MQTT URL %q is not reachable: %v; showing default page", url, err)
+		return s.navigate(kioskStartURL)
+	}
+	return s.setPage(url, false)
+}
+
 func (s *Server) displayURL(w http.ResponseWriter, r *http.Request) {
 	var req displayURLRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -295,7 +321,7 @@ func main() {
 
 	if *mqttBroker != "" {
 		mqttCtl, err := startMQTT(*mqttBroker, *mqttPageTopic, func(url string) error {
-			return server.setPage(url, false)
+			return server.setMQTTPage(url)
 		})
 		if err != nil {
 			log.Fatalf("could not start MQTT: %v", err)
