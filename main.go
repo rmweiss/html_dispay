@@ -133,17 +133,24 @@ func reachableHTTPURL(rawURL string) error {
 
 func (s *Server) currentPageUsable() (bool, string, error) {
 	s.chromeMu.Lock()
-	defer s.chromeMu.Unlock()
-
 	var currentURL string
-	if err := chromedp.Run(s.chromeCtx, chromedp.Location(&currentURL)); err != nil {
+	err := chromedp.Run(s.chromeCtx, chromedp.Location(&currentURL))
+	s.chromeMu.Unlock()
+	if err != nil {
 		return false, "", err
 	}
 
-	usable := currentURL != "" &&
-		currentURL != "about:blank" &&
-		currentURL != kioskStartupURL
-	return usable, currentURL, nil
+	if currentURL == "" || currentURL == "about:blank" || currentURL == kioskStartupURL {
+		return false, currentURL, nil
+	}
+
+	if strings.HasPrefix(currentURL, "http://") || strings.HasPrefix(currentURL, "https://") {
+		if err := reachableHTTPURL(currentURL); err != nil {
+			return false, currentURL, nil
+		}
+	}
+
+	return true, currentURL, nil
 }
 
 func (s *Server) setMQTTPage(url string) error {
