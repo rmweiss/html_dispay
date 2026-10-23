@@ -124,7 +124,10 @@ func reachableHTTPURL(rawURL string) error {
 	if err != nil {
 		return err
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return fmt.Errorf("HTTP status %s", resp.Status)
+	}
 	return nil
 }
 
