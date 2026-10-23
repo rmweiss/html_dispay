@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -24,6 +25,9 @@ type mqttController struct {
 	client        mqtt.Client
 	pageTopic     string
 	heartbeatStop chan struct{}
+
+	echoMu      sync.Mutex
+	pendingEcho map[string]int
 }
 
 func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttController, error) {
@@ -34,6 +38,7 @@ func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttContr
 	controller := &mqttController{
 		pageTopic:     pageTopic,
 		heartbeatStop: make(chan struct{}),
+		pendingEcho:   make(map[string]int),
 	}
 
 	opts := mqtt.NewClientOptions().
@@ -65,6 +70,11 @@ func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttContr
 			url := strings.TrimSpace(string(message.Payload()))
 			if url == "" {
 				log.Printf("ignoring empty MQTT page URL on %s", pageTopic)
+				return
+			}
+
+			if controller.consumeEcho(url) {
+				log.Printf("ignoring self-published MQTT page URL: %s", url)
 				return
 			}
 
@@ -199,9 +209,45 @@ func localIPv4ForBroker(broker string) (string, error) {
 	return local.IP.String(), nil
 }
 
+func (m *mqttController) markEcho(url string) {
+	m.echoMu.Lock()
+	defer m.echoMu.Unlock()
+	m.pendingEcho[url]++
+}
+
+func (m *mqttController) consumeEcho(url string) bool {
+	m.echoMu.Lock()
+	defer m.echoMu.Unlock()
+
+	count := m.pendingEcho[url]
+	if count == 0 {
+		return false
+	}
+	if count == 1 {
+		delete(m.pendingEcho, url)
+	} else {
+		m.pendingEcho[url] = count - 1
+	}
+	return true
+}
+
+func (m *mqttController) discardEcho(url string) {
+	m.echoMu.Lock()
+	defer m.echoMu.Unlock()
+
+	count := m.pendingEcho[url]
+	if count <= 1 {
+		delete(m.pendingEcho, url)
+	} else {
+		m.pendingEcho[url] = count - 1
+	}
+}
+
 func (m *mqttController) publishPage(url string) error {
+	m.markEcho(url)
 	token := m.client.Publish(m.pageTopic, mqttQoS, true, url)
 	if token.Wait() && token.Error() != nil {
+		m.discardEcho(url)
 		return token.Error()
 	}
 	log.Printf("published retained MQTT page URL to %s", m.pageTopic)
