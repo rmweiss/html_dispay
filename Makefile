@@ -1,7 +1,7 @@
 APP := html-display-server
 
 GIT_COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
-BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+BUILD_TIME := $(shell date +%Y-%m-%dT%H:%M:%S%z)
 
 LDFLAGS := -s -w \
 	-X 'main.buildTime=$(BUILD_TIME)' \
