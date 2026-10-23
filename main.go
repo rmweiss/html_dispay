@@ -131,9 +131,33 @@ func reachableHTTPURL(rawURL string) error {
 	return nil
 }
 
+func (s *Server) currentPageUsable() (bool, string, error) {
+	s.chromeMu.Lock()
+	defer s.chromeMu.Unlock()
+
+	var currentURL string
+	if err := chromedp.Run(s.chromeCtx, chromedp.Location(&currentURL)); err != nil {
+		return false, "", err
+	}
+
+	usable := currentURL != "" &&
+		currentURL != "about:blank" &&
+		currentURL != kioskStartupURL
+	return usable, currentURL, nil
+}
+
 func (s *Server) setMQTTPage(url string) error {
 	if err := reachableHTTPURL(url); err != nil {
-		log.Printf("MQTT URL %q is not reachable: %v; showing default page", url, err)
+		usable, currentURL, inspectErr := s.currentPageUsable()
+		if inspectErr != nil {
+			log.Printf("MQTT URL %q is not reachable: %v; could not inspect current page: %v; showing default page", url, err, inspectErr)
+			return s.navigate(kioskStartURL)
+		}
+		if usable {
+			log.Printf("MQTT URL %q is not reachable: %v; keeping current page %s", url, err, currentURL)
+			return nil
+		}
+		log.Printf("MQTT URL %q is not reachable: %v; no usable page is active, showing default page", url, err)
 		return s.navigate(kioskStartURL)
 	}
 	return s.setPage(url, false)
