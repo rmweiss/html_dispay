@@ -1,11 +1,22 @@
 # /etc/nixos/configuration.nix
 { config, pkgs, lib, ... }:
 
+let
+  mqttBroker = "tcp://192.168.10.12:1883";
+in
 {
   imports = [
     ./hardware-configuration.nix
     ./modules/cec.nix
+    ./modules/tv.nix
   ];
+
+  # Keep the existing CEC lifecycle hooks until deliberately switched over.
+  services.htmlDisplayTV = {
+    enable = true;
+    mqttBroker = mqttBroker;
+    lifecycle.enable = false;
+  };
 
   # Boot loader
   boot.loader.systemd-boot.enable = true;
@@ -212,7 +223,7 @@
       User = "display";
       Group = "users";
 
-      ExecStart = "/opt/html-display/html-display-server -mqtt-broker tcp://192.168.10.12:1883";
+      ExecStart = "/opt/html-display/html-display-server -mqtt-broker ${mqttBroker}";
 
       StateDirectory = "html-display";
 
