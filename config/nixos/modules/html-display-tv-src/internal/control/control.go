@@ -1,6 +1,7 @@
 package control
 
 import (
+ "encoding/hex"
  "encoding/json"
  "errors"
  "example.com/html-display-tv/internal/exlink"
@@ -21,11 +22,14 @@ type Reply struct {
  State map[string]any `json:"state,omitempty"`
  Confirmation string `json:"confirmation,omitempty"`
  Error string `json:"error,omitempty"`
+ Sent string `json:"sent,omitempty"`
+ Response string `json:"response,omitempty"`
 }
 type Controller struct {
  Port *exlink.Port
  mu sync.Mutex
  Publish func(string,any)
+ OSDLast string // Last ACKed setting this daemon session, not queried from TV.
 }
 var inputs=map[byte]string{0x39:"HDMI1",0x47:"HDMI1",0x3a:"HDMI2",0x48:"HDMI2",0x3b:"HDMI3",0x49:"HDMI3",0x3c:"HDMI4",0x4a:"HDMI4"}
 
@@ -81,12 +85,42 @@ func (c *Controller) power(on bool)(string,error){
  return "",fmt.Errorf("power %s not acknowledged after 3 attempts: %w",target,last)
 }
 func (c *Controller) handle(r Request)(Reply,error){
+ if r.Command=="raw"{
+  if r.Action!="set"{return Reply{},fmt.Errorf("raw requires hex command bytes")}
+  var input string
+  if err:=json.Unmarshal(r.Value,&input);err!=nil{return Reply{},fmt.Errorf("raw value must be a hex string")}
+  frame,err:=DecodeRaw(input)
+  if err!=nil{return Reply{},err}
+  reply,err:=c.Port.Raw(frame)
+  if err!=nil{return Reply{},fmt.Errorf("raw %x: %w (response %x)",frame,err,reply)}
+  return Reply{OK:true,Sent:hex.EncodeToString(frame),Response:hex.EncodeToString(reply),Confirmation:"ack"},nil
+ }
+ if r.Command=="osd"{
+  if r.Action==""||r.Action=="get"{
+   if c.OSDLast==""{return Reply{OK:true,Value:"UNKNOWN",Confirmation:"not_queried"},nil}
+   return Reply{OK:true,Value:c.OSDLast,Confirmation:"last_commanded"},nil
+  }
+  if r.Action!="set"{return Reply{},fmt.Errorf("osd requires on or off")}
+  var value string
+  if err:=json.Unmarshal(r.Value,&value);err!=nil{return Reply{},fmt.Errorf("osd requires ON or OFF")}
+  value=strings.ToUpper(strings.TrimSpace(value))
+  if value!="ON"&&value!="OFF"{return Reply{},fmt.Errorf("osd requires ON or OFF")}
+  v:=byte(0)
+  if value=="ON"{v=1}
+  frame:=exlink.Frame(0x08,0x22,0x0e,0x01,0x00,v)
+  reply,err:=c.Port.Raw(frame)
+  if err!=nil{return Reply{},fmt.Errorf("OSD %s: %w (response %x)",value,err,reply)}
+  c.OSDLast=value
+  if c.Publish!=nil{c.Publish("osd",value)}
+  return Reply{OK:true,Value:value,Confirmation:"ack"},nil
+ }
  if r.Command=="status"{
   state:=map[string]any{}
   for _,k:=range []string{"power","volume","mute","input","backlight"}{
    v,e:=c.get(k)
    if e==nil{state[k]=v}else{state[k]=nil}
   }
+  if c.OSDLast!="" {state["osd_last_commanded"]=c.OSDLast}
   return Reply{OK:true,State:state},nil
  }
  if r.Action==""{r.Action="get"}
@@ -130,7 +164,7 @@ func (c *Controller) handle(r Request)(Reply,error){
   if v<0||v>100{return Reply{},fmt.Errorf("volume out of range 0..100")}
   e=c.Port.Volume(byte(v))
  case "backlight":
-  if v<0||v>20{return Reply{},fmt.Errorf("backlight out of tested range 0..20")}
+  if v<0||v>50{return Reply{},fmt.Errorf("backlight out of range 0..50")}
   e=c.Port.Backlight(byte(v))
  default:return Reply{},fmt.Errorf("unsupported write: %s",r.Command)
  }
@@ -148,5 +182,25 @@ func (c *Controller) Poll(){
  if err!=nil||!r.OK||c.Publish==nil{return}
  for k,v:=range r.State{
   if v!=nil{c.Publish(k,v)}
+ }
+}
+
+// DecodeRaw accepts four payload bytes, six frame bytes without checksum,
+// or a complete checksummed seven-byte frame.
+func DecodeRaw(input string)([]byte,error){
+ cleaned:=strings.NewReplacer(" ","",":","","-","","\t","").Replace(strings.TrimSpace(input))
+ raw,err:=hex.DecodeString(cleaned)
+ if err!=nil{return nil,fmt.Errorf("invalid hex: %w",err)}
+ switch len(raw){
+ case 4:
+  return exlink.Frame(append([]byte{0x08,0x22},raw...)...),nil
+ case 6:
+  if raw[0]!=0x08||raw[1]!=0x22{return nil,fmt.Errorf("expected ExLink header 08 22")}
+  return exlink.Frame(raw...),nil
+ case 7:
+  if err:=exlink.ValidateRawFrame(raw);err!=nil{return nil,err}
+  return raw,nil
+ default:
+  return nil,fmt.Errorf("expected 4 command bytes, 6 frame bytes without checksum, or 7 complete bytes; got %d",len(raw))
  }
 }

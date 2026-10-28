@@ -1,6 +1,7 @@
 package exlink
 
 import (
+ "encoding/hex"
  "errors"
  "fmt"
  "io"
@@ -110,4 +111,52 @@ func (p *Port) Input(hdmi int)error{
  if hdmi<1||hdmi>4{return fmt.Errorf("unsupported HDMI input %d",hdmi)}
  _,e:=p.exchange(Frame(0x08,0x22,0x0a,0x00,0x05,byte(hdmi-1)),nil)
  return e
+}
+
+// ValidateRawFrame accepts a complete seven-byte Samsung ExLink command.
+func ValidateRawFrame(frame []byte) error {
+ if len(frame)!=7 { return fmt.Errorf("ExLink frame must be 7 bytes, got %d",len(frame)) }
+ if frame[0]!=0x08 || frame[1]!=0x22 {return fmt.Errorf("expected ExLink header 08 22")}
+ var sum byte
+ for _,v:=range frame {sum+=v}
+ if sum!=0 {return fmt.Errorf("invalid ExLink checksum; expected %02X",Frame(frame[:6]...)[6])}
+ return nil
+}
+// Raw sends a validated frame, captures ACK and response, and shares the serial mutex.
+func (p *Port) Raw(frame []byte)([]byte,error){
+ if err:=ValidateRawFrame(frame);err!=nil{return nil,err}
+ p.mu.Lock()
+ defer p.mu.Unlock()
+ fd:=int(p.f.Fd())
+ tmp:=make([]byte,256)
+ for{
+  n,e:=syscall.Read(fd,tmp)
+  if n<=0||e!=nil{break}
+ }
+ for offset:=0;offset<len(frame);{
+  n,e:=syscall.Write(fd,frame[offset:])
+  if e==syscall.EAGAIN{time.Sleep(5*time.Millisecond);continue}
+  if e!=nil{return nil,e}
+  if n==0{return nil,io.ErrNoProgress}
+  offset+=n
+ }
+ deadline:=time.Now().Add(1800*time.Millisecond)
+ var received []byte
+ var lastByte time.Time
+ ack,nack:=false,false
+ for time.Now().Before(deadline){
+  n,e:=syscall.Read(fd,tmp)
+  if n>0 {received=append(received,tmp[:n]...);lastByte=time.Now()} else if e!=nil&&e!=syscall.EAGAIN&&e!=syscall.EWOULDBLOCK {return received,e}
+  for i:=0;i+3<=len(received);i++{
+   if received[i]==3&&received[i+1]==12{
+    if received[i+2]==0xf1{ack=true}
+    if received[i+2]==0xff{nack=true}
+   }
+  }
+  if nack{return received,fmt.Errorf("%w (response %s)",ErrNack,hex.EncodeToString(received))}
+  if ack&&time.Since(lastByte)>=120*time.Millisecond{return received,nil}
+  if len(received)>=512{return received,fmt.Errorf("raw response exceeds 512 bytes")}
+  time.Sleep(10*time.Millisecond)
+ }
+ return received,fmt.Errorf("%w (response %s)",ErrTimeout,hex.EncodeToString(received))
 }
