@@ -17,11 +17,15 @@ func main() {
  flag.Parse()
  args := flag.Args()
  if len(args) < 1 {
-  fmt.Fprintln(os.Stderr, "usage: tvctl [--socket PATH] status | power on|off|get | volume get|set N | backlight get|set N | mute get | input get|set HDMI1..HDMI4")
+  fmt.Fprintln(os.Stderr, "usage: tvctl [--socket PATH] status | power on|off|get | volume get|set N | backlight get|set N | mute get | osd get|on|off | input get|set HDMI1..HDMI4 | raw 0E 01 00 00")
   os.Exit(2)
  }
  req := control.Request{Command:args[0], Action:"get"}
- if len(args)>1 {
+ if req.Command=="raw" {
+  if len(args)<2 { fmt.Fprintln(os.Stderr,"raw requires 4, 6 or 7 hex bytes"); os.Exit(2) }
+  req.Action="set"
+  req.Value,_=json.Marshal(strings.Join(args[1:]," "))
+ } else if len(args)>1 {
   switch strings.ToLower(args[1]) {
   case "get":
   case "on", "off":
