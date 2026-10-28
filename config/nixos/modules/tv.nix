@@ -21,6 +21,11 @@ in {
       type = lib.types.str;
       default = "/dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller_D-if00-port0";
     };
+    osdOnStartup = lib.mkOption {
+      type = lib.types.enum [ "keep" "off" "on" ];
+      default = "off";
+      description = "Command-result OSD policy on daemon startup; keep sends no command.";
+    };
     mqttBroker = lib.mkOption {
       type = lib.types.str;
       default = "tcp://192.168.10.12:1883";
@@ -36,7 +41,7 @@ in {
       after = [ "systemd-udev-trigger.service" ];
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${package}/bin/html-display-tv -device ${lib.escapeShellArg cfg.serialDevice} -socket /run/html-display-tv/control.sock -mqtt-broker ${lib.escapeShellArg cfg.mqttBroker}";
+        ExecStart = "${package}/bin/html-display-tv -device ${lib.escapeShellArg cfg.serialDevice} -socket /run/html-display-tv/control.sock -mqtt-broker ${lib.escapeShellArg cfg.mqttBroker} -osd-startup ${lib.escapeShellArg cfg.osdOnStartup}";
         RuntimeDirectory = "html-display-tv";
         RuntimeDirectoryMode = "0755";
         User = "root";
