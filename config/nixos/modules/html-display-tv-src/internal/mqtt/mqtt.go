@@ -94,12 +94,17 @@ func (c *Client) PublishDiscovery(){
  entity("switch","power",config{
   "command_topic":c.Prefix+"/power/set","state_topic":c.Prefix+"/power/state",
   "payload_on":"ON","payload_off":"OFF","state_on":"ON","state_off":"OFF","icon":"mdi:television"})
- for _,spec:=range []struct{name string;max int}{{"volume",100},{"backlight",20}}{
+ for _,spec:=range []struct{name string;max int}{{"volume",100},{"backlight",50}}{
   entity("number",spec.name,config{
    "command_topic":c.Prefix+"/"+spec.name+"/set",
    "state_topic":c.Prefix+"/"+spec.name+"/state",
    "min":0,"max":spec.max,"step":1,"mode":"box"})
  }
+ entity("switch","osd",config{
+  "command_topic":c.Prefix+"/osd/set",
+  "state_topic":c.Prefix+"/osd/state",
+  "payload_on":"ON","payload_off":"OFF","state_on":"ON","state_off":"OFF",
+  "icon":"mdi:monitor-eye"})
  entity("binary_sensor","mute",config{
   "state_topic":c.Prefix+"/mute/state","payload_on":"true","payload_off":"false","icon":"mdi:volume-off"})
  entity("select","input",config{
