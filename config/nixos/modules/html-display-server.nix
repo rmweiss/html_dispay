@@ -11,7 +11,7 @@ buildGoModule {
 
   # TODO: Replace with the actual dependency vendor hash from a Nix build.
   # The initial build reports the expected sha256 on a fixed-output hash mismatch.
-  vendorHash = lib.fakeHash;
+  vendorHash = "sha256-hxvFD2Fdau3RL/uQM3HezJV3K6S9L9B0AkcWUeXLOYY=";
 
   ldflags = [ "-s" "-w" ];
   postInstall = ''
