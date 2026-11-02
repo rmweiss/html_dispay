@@ -13,6 +13,17 @@ let
   tvctl = "${package}/bin/tvctl";
   on = "${pkgs.coreutils}/bin/timeout 32s ${tvctl} power on";
   off = "${pkgs.coreutils}/bin/timeout 32s ${tvctl} power off";
+  # After= orders starts, but the daemon may not have bound its socket yet.
+  onWhenReady = pkgs.writeShellScript "html-display-tv-on-when-ready" ''
+    for attempt in $(${pkgs.coreutils}/bin/seq 1 20); do
+      if ${tvctl} status >/dev/null 2>&1; then
+        exec ${on}
+      fi
+      ${pkgs.coreutils}/bin/sleep 1
+    done
+    echo "ExLink controller did not become ready within 20 seconds" >&2
+    exit 1
+  '';
 in {
   options.services.htmlDisplayTV = {
     enable = lib.mkEnableOption "Samsung Frame ExLink controller";
@@ -59,9 +70,9 @@ in {
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        ExecStart = on;
+        ExecStart = onWhenReady;
         ExecStop = off;
-        TimeoutStartSec = "40s";
+        TimeoutStartSec = "65s";
         TimeoutStopSec = "40s";
       };
     };
