@@ -1,6 +1,7 @@
 package main
 
 import (
+ "context"
  "encoding/json"
  "errors"
  "fmt"
@@ -10,7 +11,6 @@ import (
  "os/exec"
  "path/filepath"
  "strconv"
- "syscall"
  "strings"
  "sync"
  "time"
@@ -27,8 +27,6 @@ type brightnessController struct {
  executable string
  stateFile string
  value int
- process *exec.Cmd
- processDone chan error
 }
 
 func newBrightnessController(executable, stateFile string) (*brightnessController, error) {
@@ -48,67 +46,51 @@ func (b *brightnessController) get() int {
  return b.value
 }
 
-// stopLocked releases the previous gamma-control object before starting another.
-// Sway only allows one active controller per output.
-func (b *brightnessController) stopLocked() {
- if b.process == nil { return }
- cmd, done := b.process, b.processDone
- b.process = nil
- b.processDone = nil
- _ = cmd.Process.Signal(syscall.SIGTERM)
- select {
- case <-done:
- case <-time.After(2 * time.Second):
-  _ = cmd.Process.Kill()
-  <-done
- }
-}
-
-// apply must be called with b.mu held. Unlike -O, a running Gammastep
-// process owns the Sway gamma-control object and keeps the dimming active.
-func (b *brightnessController) apply(value int) error {
- if b.executable == "" { return fmt.Errorf("software brightness backend is not configured") }
+// dbusEnv addresses the display user's user bus, even when the Go server
+// is started as a system service without an interactive session environment.
+func dbusEnv() []string {
  runtime := os.Getenv("XDG_RUNTIME_DIR")
  if runtime == "" { runtime = fmt.Sprintf("/run/user/%d", os.Getuid()) }
- display := os.Getenv("WAYLAND_DISPLAY")
- if display == "" {
-  sockets, _ := filepath.Glob(filepath.Join(runtime, "wayland-*"))
-  for _, socket := range sockets {
-   if strings.HasSuffix(socket, ".lock") { continue }
-   info, err := os.Stat(socket)
-   if err == nil && info.Mode()&os.ModeSocket != 0 {
-    display = filepath.Base(socket)
-    break
-   }
-  }
+ env := append(os.Environ(), "XDG_RUNTIME_DIR="+runtime)
+ if os.Getenv("DBUS_SESSION_BUS_ADDRESS") == "" {
+  env = append(env, "DBUS_SESSION_BUS_ADDRESS=unix:path="+filepath.Join(runtime, "bus"))
  }
- if display == "" { return fmt.Errorf("no Wayland display socket found in %s", runtime) }
- // The constant day/night settings avoid any time-based adjustment.
- brightness := strconv.FormatFloat(float64(value)/100, 'f', 2, 64)
- b.stopLocked()
- cmd := exec.Command(b.executable, "-m", "wayland", "-l", "0:0", "-t", "6500:6500", "-b", brightness+":"+brightness, "-r")
- cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+runtime, "WAYLAND_DISPLAY="+display)
- cmd.Stdout = os.Stdout
- cmd.Stderr = os.Stderr
- if err := cmd.Start(); err != nil { return fmt.Errorf("start gammastep: %w", err) }
- done := make(chan error, 1)
- go func() { done <- cmd.Wait() }()
- // Reject immediately failing processes instead of reporting success to MQTT.
- select {
- case err := <-done:
-  return fmt.Errorf("gammastep exited during startup: %v", err)
- case <-time.After(500 * time.Millisecond):
-  b.process = cmd
-  b.processDone = done
-  return nil
- }
+ return env
 }
 
-// close stops the managed gamma controller on orderly shutdown.
-func (b *brightnessController) close() {
+func (b *brightnessController) busctl(args ...string) (string, error) {
+ ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+ defer cancel()
+ cmd := exec.CommandContext(ctx, b.executable, append([]string{"--user"}, args...)...)
+ cmd.Env = dbusEnv()
+ output, err := cmd.CombinedOutput()
+ if err != nil { return "", fmt.Errorf("brightness D-Bus request failed: %w: %s", err, strings.TrimSpace(string(output))) }
+ return strings.TrimSpace(string(output)), nil
+}
+
+// apply must be called with b.mu held. wl-gammarelay-rs retains the
+// Wayland gamma-control object; the server only sets its D-Bus property.
+func (b *brightnessController) apply(value int) error {
+ if b.executable == "" { return fmt.Errorf("software brightness backend is not configured") }
+ _, err := b.busctl("set-property", "rs.wl-gammarelay", "/", "rs.wl.gammarelay",
+  "Brightness", "d", strconv.FormatFloat(float64(value)/100, 'f', 2, 64))
+ return err
+}
+
+// reconcile re-applies saved brightness when the relay starts or restarts,
+// without disturbing it when the reported brightness already matches.
+func (b *brightnessController) reconcile() error {
  b.mu.Lock()
  defer b.mu.Unlock()
- b.stopLocked()
+ raw, err := b.busctl("get-property", "rs.wl-gammarelay", "/", "rs.wl.gammarelay", "Brightness")
+ if err != nil { return err }
+ parts := strings.Fields(raw)
+ if len(parts) != 2 || parts[0] != "d" { return fmt.Errorf("unexpected relay brightness response %q", raw) }
+ actual, err := strconv.ParseFloat(parts[1], 64)
+ if err != nil { return fmt.Errorf("invalid relay brightness %q: %w", raw, err) }
+ desired := float64(b.value) / 100
+ if actual >= desired-0.0001 && actual <= desired+0.0001 { return nil }
+ return b.apply(b.value)
 }
 
 func (b *brightnessController) set(value int) error {
