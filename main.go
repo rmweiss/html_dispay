@@ -38,6 +38,7 @@ type Server struct {
 	launchMode  bool
 	contentFile string
 	mqtt        *mqttController
+	brightness  *brightnessController
 }
 
 type displayURLRequest struct {
@@ -285,6 +286,7 @@ func main() {
 		"html-display/display/url",
 		"retained MQTT topic containing the desired page URL",
 	)
+	brightnessBackend := flag.String("brightness-backend", "", "path to gammastep; empty disables software brightness")
 	showVersion := flag.Bool("version", false, "print build information and exit")
 	flag.Parse()
 
@@ -311,8 +313,17 @@ func main() {
 		chromeCtx: chromeCtx, chromeClose: cleanup,
 		launchMode: *launchLocalBrowser, contentFile: contentFile,
 	}
-	defer func() {
-		server.chromeMu.Lock()
+	if *brightnessBackend != "" {
+  brightness, err := newBrightnessController(*brightnessBackend, brightnessFile)
+  if err != nil { log.Fatalf("software brightness state: %v", err) }
+  server.brightness = brightness
+  brightness.mu.Lock()
+  err = brightness.apply(brightness.value)
+  brightness.mu.Unlock()
+  if err != nil { log.Printf("initial software brightness could not be applied: %v", err) }
+ }
+ defer func() {
+  server.chromeMu.Lock()
 		defer server.chromeMu.Unlock()
 		if server.chromeClose != nil {
 			server.chromeClose()
@@ -325,6 +336,8 @@ func main() {
 	mux.HandleFunc("POST /api/display/url", server.displayURL)
 	mux.HandleFunc("POST /api/display/html", server.displayHTML)
 	mux.HandleFunc("GET /display/content", server.displayContent)
+	mux.HandleFunc("GET /api/display/brightness", server.softwareBrightness)
+	mux.HandleFunc("PUT /api/display/brightness", server.softwareBrightness)
 
 	httpServer := &http.Server{
 		Addr:    listenAddr,
@@ -359,8 +372,8 @@ func main() {
 
 	if *mqttBroker != "" {
 		mqttCtl, err := startMQTT(*mqttBroker, *mqttPageTopic, func(url string) error {
-			return server.setMQTTPage(url)
-		})
+   return server.setMQTTPage(url)
+  }, server.brightness)
 		if err != nil {
 			log.Fatalf("could not start MQTT: %v", err)
 		}
