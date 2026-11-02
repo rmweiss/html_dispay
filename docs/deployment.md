@@ -1,4 +1,6 @@
-# Kiosk deployment
+# Kiosk deployment (historical notes)
+
+**Current migration:** See [Git-based NixOS deployment](git-deployment.md) for the proposed Nix-built server and ExLink controller. This page documents the earlier manually installed binary and CEC configuration; its installation instructions are retained for reference, not for new deployments.
 
 ## Checked-in NixOS configuration
 
