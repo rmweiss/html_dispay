@@ -3,8 +3,8 @@
 
 {
   imports = [
-    ./hardware-configuration.nix
-    ./modules/cec.nix
+    /etc/nixos/hardware-configuration.nix
+    ./modules/tv.nix
   ];
 
   # Boot loader
@@ -27,13 +27,11 @@
   systemd.services."getty@tty1".enable = false;
   systemd.services."autovt@tty1".enable = false;
 
-  # Preserve both kiosk services during routine NixOS configuration switches.
-  # Auto-restarting the services on unit changes interrupted the display;
-  # with restartIfChanged = false, manually restart/reboot when intentionally
-  # changing the kiosk units, Chromium command line, or server binary.
+  # Sway keeps tty1 during rebuilds; server upgrades may restart the controller.
+  # We deliberately prefer predictable deployment to uninterrupted server uptime.
   # This does NOT disable systemd's serviceConfig.Restart = "always" for crashes.
   systemd.services.html-display-sway.restartIfChanged = false;
-  systemd.services.html-display-server.restartIfChanged = false;
+  systemd.services.html-display-server.restartIfChanged = true;
 
   networking.hostName = "html-display";
   networking.networkmanager.enable = true;
@@ -182,10 +180,14 @@
   };
 
   # ---------------------------------------------------------------------------
-  # HTML display control server
+  # HTML display control server, built from the checked-out Git source
   # ---------------------------------------------------------------------------
 
-
+  services.htmlDisplayTV = {
+    enable = true;
+    lifecycle.enable = true;
+    osdOnStartup = "off";
+  };
 
   systemd.services.html-display-server = {
 
@@ -212,7 +214,7 @@
       User = "display";
       Group = "users";
 
-      ExecStart = "/opt/html-display/html-display-server -mqtt-broker tcp://192.168.10.12:1883";
+      ExecStart = "${pkgs.callPackage ./modules/html-display-server.nix { }}/bin/html-display-server -mqtt-broker tcp://192.168.10.12:1883";
 
       StateDirectory = "html-display";
 
