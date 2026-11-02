@@ -214,7 +214,7 @@
       User = "display";
       Group = "users";
 
-      ExecStart = "${pkgs.callPackage ./modules/html-display-server.nix { }}/bin/html-display-server -mqtt-broker tcp://192.168.10.12:1883";
+      ExecStart = "${pkgs.callPackage ./modules/html-display-server.nix { }}/bin/html-display-server -mqtt-broker tcp://192.168.10.12:1883 -brightness-backend ${pkgs.gammastep}/bin/gammastep";
 
       StateDirectory = "html-display";
 
