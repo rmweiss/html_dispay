@@ -32,3 +32,7 @@ The backend detects a Wayland socket in `/run/user/<display UID>/wayland-*` when
 ## Notes
 
 Software dimming does not save backlight energy, and is intentionally separate from the TV backlight entity. This is a gamma-ramp operation affecting the whole Sway output, not Chromium alone. Only one gamma-ramp manager should own the display; do not run other Gammastep instances concurrently. If the compositor restarts, the service restarts with it and re-applies the stored value.
+
+## Sway gamma-control lifetime
+
+Sway restores the original gamma ramps when the Wayland gamma-control object is destroyed. Consequently, `gammastep -O` is **not** suitable: its one-shot process exits and the brightness immediately returns to normal. The server now runs Gammastep continuously with fixed `-t 6500:6500 -b VALUE:VALUE -r` settings, and terminates its old managed process before launching the next one. A brief normal-brightness flash is possible between process replacements; avoiding that completely requires an in-process Wayland gamma-control implementation. The controller checks that a new Gammastep process survives initial startup, but cannot verify its gamma ramps optically.
