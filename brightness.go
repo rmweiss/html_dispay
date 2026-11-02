@@ -1,7 +1,6 @@
 package main
 
 import (
- "context"
  "encoding/json"
  "errors"
  "fmt"
@@ -11,6 +10,7 @@ import (
  "os/exec"
  "path/filepath"
  "strconv"
+ "syscall"
  "strings"
  "sync"
  "time"
@@ -27,6 +27,8 @@ type brightnessController struct {
  executable string
  stateFile string
  value int
+ process *exec.Cmd
+ processDone chan error
 }
 
 func newBrightnessController(executable, stateFile string) (*brightnessController, error) {
@@ -46,8 +48,24 @@ func (b *brightnessController) get() int {
  return b.value
 }
 
-// apply must be called with b.mu held. Gammastep -O is a one-shot
-// gamma-ramp operation, not a continuously running brightness daemon.
+// stopLocked releases the previous gamma-control object before starting another.
+// Sway only allows one active controller per output.
+func (b *brightnessController) stopLocked() {
+ if b.process == nil { return }
+ cmd, done := b.process, b.processDone
+ b.process = nil
+ b.processDone = nil
+ _ = cmd.Process.Signal(syscall.SIGTERM)
+ select {
+ case <-done:
+ case <-time.After(2 * time.Second):
+  _ = cmd.Process.Kill()
+  <-done
+ }
+}
+
+// apply must be called with b.mu held. Unlike -O, a running Gammastep
+// process owns the Sway gamma-control object and keeps the dimming active.
 func (b *brightnessController) apply(value int) error {
  if b.executable == "" { return fmt.Errorf("software brightness backend is not configured") }
  runtime := os.Getenv("XDG_RUNTIME_DIR")
@@ -65,13 +83,32 @@ func (b *brightnessController) apply(value int) error {
   }
  }
  if display == "" { return fmt.Errorf("no Wayland display socket found in %s", runtime) }
- ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
- defer cancel()
- cmd := exec.CommandContext(ctx, b.executable, "-m", "wayland", "-O", "6500", "-b", strconv.FormatFloat(float64(value)/100, 'f', 2, 64))
+ // The constant day/night settings avoid any time-based adjustment.
+ brightness := strconv.FormatFloat(float64(value)/100, 'f', 2, 64)
+ b.stopLocked()
+ cmd := exec.Command(b.executable, "-m", "wayland", "-l", "0:0", "-t", "6500:6500", "-b", brightness+":"+brightness, "-r")
  cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+runtime, "WAYLAND_DISPLAY="+display)
- output, err := cmd.CombinedOutput()
- if err != nil { return fmt.Errorf("gammastep: %w: %s", err, strings.TrimSpace(string(output))) }
- return nil
+ cmd.Stdout = os.Stdout
+ cmd.Stderr = os.Stderr
+ if err := cmd.Start(); err != nil { return fmt.Errorf("start gammastep: %w", err) }
+ done := make(chan error, 1)
+ go func() { done <- cmd.Wait() }()
+ // Reject immediately failing processes instead of reporting success to MQTT.
+ select {
+ case err := <-done:
+  return fmt.Errorf("gammastep exited during startup: %v", err)
+ case <-time.After(500 * time.Millisecond):
+  b.process = cmd
+  b.processDone = done
+  return nil
+ }
+}
+
+// close stops the managed gamma controller on orderly shutdown.
+func (b *brightnessController) close() {
+ b.mu.Lock()
+ defer b.mu.Unlock()
+ b.stopLocked()
 }
 
 func (b *brightnessController) set(value int) error {
