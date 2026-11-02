@@ -317,6 +317,7 @@ func main() {
   brightness, err := newBrightnessController(*brightnessBackend, brightnessFile)
   if err != nil { log.Fatalf("software brightness state: %v", err) }
   server.brightness = brightness
+  defer brightness.close()
   brightness.mu.Lock()
   err = brightness.apply(brightness.value)
   brightness.mu.Unlock()
