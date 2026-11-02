@@ -121,6 +121,10 @@
     # Black background.
     output * bg #000000 solid_color
 
+    # Gamma controller is independent of Chromium and the HTTP server.
+    # The Sway-launched process has the correct Wayland environment.
+    exec ${pkgs.wl-gammarelay-rs}/bin/wl-gammarelay-rs
+
     # Start Chromium.
     exec ${pkgs.chromium}/bin/chromium \
       --user-data-dir=/run/html-display/chromium \
@@ -214,7 +218,7 @@
       User = "display";
       Group = "users";
 
-      ExecStart = "${pkgs.callPackage ./modules/html-display-server.nix { }}/bin/html-display-server -mqtt-broker tcp://192.168.10.12:1883 -brightness-backend ${pkgs.gammastep}/bin/gammastep";
+      ExecStart = "${pkgs.callPackage ./modules/html-display-server.nix { }}/bin/html-display-server -mqtt-broker tcp://192.168.10.12:1883 -brightness-backend ${pkgs.systemd}/bin/busctl";
 
       StateDirectory = "html-display";
 
