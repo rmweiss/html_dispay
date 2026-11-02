@@ -1,15 +1,21 @@
-# Software brightness (Gammastep)
+# Software brightness (wl-gammarelay-rs)
 
-Software brightness is independent of the Samsung TV backlight and `html-display-tv`. It adjusts the Sway output's gamma ramps, not physical backlight power.
+Software brightness is independent of the Samsung TV backlight and `html-display-tv`. It adjusts Sway's output gamma ramps, not physical backlight power.
 
-The NixOS `html-display-server` service enables the backend using `-brightness-backend ${pkgs.gammastep}/bin/gammastep`. With no flag (e.g. local development), brightness is disabled and the REST endpoint returns 503.
+## Runtime / NixOS
+
+The Sway config launches `wl-gammarelay-rs` independently of Chromium and the Go server. The relay owns the Wayland gamma-control connection and exposes the writable D-Bus property `rs.wl-gammarelay` at `/`, interface `rs.wl.gammarelay`, property `Brightness` (double, 0.0–1.0).
+
+The NixOS `html-display-server` service enables the backend using `-brightness-backend ${pkgs.systemd}/bin/busctl`. The flag is a path to **busctl**, not to the relay or Gammastep. With no flag (for example in local development) software brightness is disabled and REST returns 503.
+
+The server runs as the `display` user and talks to that user's D-Bus session bus at `/run/user/<uid>/bus` via `DBUS_SESSION_BUS_ADDRESS` if no address is supplied. No Wayland socket discovery is needed in the server itself.
 
 ## REST
 
-- `GET /api/display/brightness` → `{"brightness":25}`
-- `PUT /api/display/brightness` with `{"brightness":25}` → 204
+- `GET /api/display/brightness` → `{"brightness":25}` (saved desired value)
+- `PUT /api/display/brightness` with `{"brightness":25}` → 204 on successfully applied setting
 
-Values are integers **10–100**, corresponding to Gammastep brightness 0.10–1.00. 100 means no software dimming. The 10% floor prevents setting an unexpectedly invisible output.
+Values are integers **10–100**, corresponding to relay brightness 0.10–1.00. 100 is no software dimming. The floor is intended to avoid making the display fully invisible.
 
 ```sh
 curl -X PUT http://html-display:8080/api/display/brightness \
@@ -18,21 +24,24 @@ curl -X PUT http://html-display:8080/api/display/brightness \
 
 ## MQTT / Home Assistant
 
-The existing `homeassistant/device/html-display/config` device discovery gains a `number` component called **Software Brightness**:
+The existing `homeassistant/device/html-display/config` discovery includes a `number` component called **Software Brightness**:
 
 - Command: `html-display/display/brightness/set` (plain integer)
 - State: `html-display/display/brightness/state` (retained plain integer)
 
-Command input is range-checked; only successfully applied values are published as state. State is also published when MQTT connects. Commands are not retained by the server.
+Invalid commands are ignored. An MQTT state message is published after a successful D-Bus write and on MQTT connection. State published at connection reflects the saved desired brightness, which may temporarily differ from actual gamma ramps if the relay has not started yet.
 
-The last applied setting is saved atomically as `/var/lib/html-display/software-brightness.json` and applied again at startup. On failure to find the Wayland display or apply Gammastep, the server logs the error and remains operational; REST errors are reported and MQTT does not publish a falsely successful state.
+The last successfully applied brightness is persisted as `/var/lib/html-display/software-brightness.json`. The Go server checks the relay brightness every 10 seconds and reapplies its saved setting when the relay has started or restarted. D-Bus failures are logged; the server stays operational, REST writes report an error and MQTT writes do not acknowledge success.
 
-The backend detects a Wayland socket in `/run/user/<display UID>/wayland-*` when `WAYLAND_DISPLAY` is not set, and operates as the `display` user.
+## Manual diagnostics
 
-## Notes
+Run the following as the `display` user with its user bus available:
 
-Software dimming does not save backlight energy, and is intentionally separate from the TV backlight entity. This is a gamma-ramp operation affecting the whole Sway output, not Chromium alone. Only one gamma-ramp manager should own the display; do not run other Gammastep instances concurrently. If the compositor restarts, the service restarts with it and re-applies the stored value.
+```sh
+busctl --user get-property rs.wl-gammarelay / rs.wl.gammarelay Brightness
+busctl --user set-property rs.wl-gammarelay / rs.wl.gammarelay Brightness d 0.25
+```
 
-## Sway gamma-control lifetime
+Inspect the relay process with `pgrep -af wl-gammarelay-rs` and the server logs with `journalctl -u html-display-server -b`. Do not run a separate Gammastep process concurrently; only one gamma-ramp controller should own a Sway output.
 
-Sway restores the original gamma ramps when the Wayland gamma-control object is destroyed. Consequently, `gammastep -O` is **not** suitable: its one-shot process exits and the brightness immediately returns to normal. The server now runs Gammastep continuously with fixed `-t 6500:6500 -b VALUE:VALUE -r` settings, and terminates its old managed process before launching the next one. A brief normal-brightness flash is possible between process replacements; avoiding that completely requires an in-process Wayland gamma-control implementation. The controller checks that a new Gammastep process survives initial startup, but cannot verify its gamma ramps optically.
+Because the relay stays running, changes do not cause a gamma-controller teardown and should avoid the normal-brightness flashes from the former Gammastep implementation. Changes have not yet been validated on the target appliance.
