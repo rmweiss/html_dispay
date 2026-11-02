@@ -6,7 +6,8 @@ HTML Display is a small Go control server for an existing Chromium kiosk tab. It
 - [Samsung Frame ExLink command reference](exlink.md) — serial protocol, tested commands, status queries, `tvctl`, and Home Assistant integration
 - [Backlight and deep-standby recovery](brightness.md) — observed frozen-backlight fault, diagnostics, and verified ExLink recovery
 - [Earlier HDMI-CEC integration](deployment.md#tv-power-and-hdmi-cec) — historical Pulse-Eight setup and suspend/resume notes
-- [Kiosk deployment](deployment.md) — the tested NixOS setup and what must be supplied outside this repository
+- [Git-based NixOS deployment](git-deployment.md) — migration and routine `git pull` / `nixos-rebuild switch` workflow
+- [Earlier kiosk deployment](deployment.md) — historical setup and tested tty1 precautions
 - [Audio and Scene Composer](audio.md) — working Music Assistant/Squeezelite integration, browser priority, limitations, and planned mpv takeover
 - [Temporary mpv takeover: first concept](mpv-takeover-concept.md) — proposed mpv playback and return to Chromium; not implemented
 - [Plans and open questions](roadmap.md) — desired behavior that the current Go code does not implement
