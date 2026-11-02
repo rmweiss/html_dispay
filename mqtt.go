@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/url"
+ "strconv"
 	"strings"
 	"sync"
 	"time"
@@ -30,7 +31,7 @@ type mqttController struct {
 	pendingEcho map[string]int
 }
 
-func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttController, error) {
+func startMQTT(broker, pageTopic string, setPage func(string) error, brightness *brightnessController) (*mqttController, error) {
 	if strings.TrimSpace(pageTopic) == "" {
 		return nil, fmt.Errorf("MQTT page topic must not be empty")
 	}
@@ -62,7 +63,7 @@ func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttContr
 			}
 		}
 
-		if err := publishHomeAssistantDiscovery(client, pageTopic); err != nil {
+		if err := publishHomeAssistantDiscovery(client, pageTopic, brightness); err != nil {
 			log.Printf("could not publish Home Assistant discovery: %v", err)
 		}
 
@@ -88,6 +89,27 @@ func startMQTT(broker, pageTopic string, setPage func(string) error) (*mqttContr
 			return
 		}
 		log.Printf("subscribed to MQTT page topic %s", pageTopic)
+  if brightness != nil {
+   // Publish actual state before subscribing to commands (which may be retained).
+   if err := controller.publishBrightness(brightness.get()); err != nil {
+    log.Printf("could not publish software brightness state: %v", err)
+   }
+   tok := client.Subscribe(brightnessSetTopic, mqttQoS, func(_ mqtt.Client, message mqtt.Message) {
+    requested, err := strconv.Atoi(strings.TrimSpace(string(message.Payload())))
+    if err != nil || requested < 10 || requested > 100 {
+     log.Printf("invalid brightness MQTT command %q", string(message.Payload()))
+     return
+    }
+    if err := brightness.set(requested); err != nil {
+     log.Printf("software brightness command failed: %v", err)
+     return
+    }
+    if err := controller.publishBrightness(requested); err != nil {
+     log.Printf("could not publish software brightness state: %v", err)
+    }
+   })
+   if tok.Wait() && tok.Error() != nil { log.Printf("could not subscribe to brightness topic: %v", tok.Error()) }
+  }
 	}
 
 	opts.OnConnectionLost = func(_ mqtt.Client, err error) {
@@ -132,7 +154,7 @@ func (m *mqttController) runHeartbeat() {
 	}
 }
 
-func publishHomeAssistantDiscovery(client mqtt.Client, pageTopic string) error {
+func publishHomeAssistantDiscovery(client mqtt.Client, pageTopic string, brightness *brightnessController) error {
 	payload := map[string]any{
 		"o": map[string]any{
 			"name": "html-display",
@@ -169,7 +191,21 @@ func publishHomeAssistantDiscovery(client mqtt.Client, pageTopic string) error {
 		},
 	}
 
-	body, err := json.Marshal(payload)
+if brightness != nil {
+  payload["cmps"].(map[string]any)["software_brightness"] = map[string]any{
+   "p": "number",
+   "name": "Software Brightness",
+   "unique_id": "html_display_software_brightness",
+   "command_topic": brightnessSetTopic,
+   "state_topic": brightnessStateTopic,
+   "min": 10,
+   "max": 100,
+   "step": 1,
+   "unit_of_measurement": "%",
+   "icon": "mdi:brightness-6",
+  }
+ }
+ body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
@@ -260,4 +296,10 @@ func (m *mqttController) close() {
 	}
 	close(m.heartbeatStop)
 	m.client.Disconnect(250)
+}
+
+func (m *mqttController) publishBrightness(value int) error {
+ token := m.client.Publish(brightnessStateTopic, mqttQoS, true, strconv.Itoa(value))
+ if !token.Wait() { return fmt.Errorf("MQTT publish did not complete") }
+ return token.Error()
 }
