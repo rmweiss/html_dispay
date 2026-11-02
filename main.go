@@ -286,7 +286,7 @@ func main() {
 		"html-display/display/url",
 		"retained MQTT topic containing the desired page URL",
 	)
-	brightnessBackend := flag.String("brightness-backend", "", "path to gammastep; empty disables software brightness")
+	brightnessBackend := flag.String("brightness-backend", "", "path to busctl for wl-gammarelay-rs; empty disables software brightness")
 	showVersion := flag.Bool("version", false, "print build information and exit")
 	flag.Parse()
 
@@ -317,11 +317,17 @@ func main() {
   brightness, err := newBrightnessController(*brightnessBackend, brightnessFile)
   if err != nil { log.Fatalf("software brightness state: %v", err) }
   server.brightness = brightness
-  defer brightness.close()
-  brightness.mu.Lock()
-  err = brightness.apply(brightness.value)
-  brightness.mu.Unlock()
-  if err != nil { log.Printf("initial software brightness could not be applied: %v", err) }
+  // Reconcile startup races and relay restarts without restarting the server.
+  go func() {
+   ticker := time.NewTicker(10 * time.Second)
+   defer ticker.Stop()
+   for {
+    if err := brightness.reconcile(); err != nil {
+     log.Printf("software brightness relay unavailable: %v", err)
+    }
+    <-ticker.C
+   }
+  }()
  }
  defer func() {
   server.chromeMu.Lock()
