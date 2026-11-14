@@ -420,22 +420,25 @@
           "target.object" = "html-display-browser";
         };
       }
-      {
-        # mpv native PipeWire AO bypasses pipewire-pulse stream.rules.
-        # Test with mpv --ao=pulse to assign the Takeover class here.
-        matches = [
-          {
-            "application.process.binary" = "mpv";
-            "media.class" = "Stream/Output/Audio";
-          }
-        ];
-        actions.update-props = {
-          "media.role" = "Takeover";
-          "target.object" = "html-display-takeover";
-        };
-      }
     ];
   };
+
+  # Manual mpv entrypoint with the audio routing verified on the N100.
+  # Leave video/render/cache/source options to callers and the future service.
+  # Run in the display user's graphical session. Do not call plain mpv if
+  # the Takeover priority is required.
+  #
+  # The pipewire-pulse stream rule did not reliably add MPV's role in testing,
+  # so pass both the role and the virtual sink explicitly.
+  environment.systemPackages = [
+    (pkgs.writeShellScriptBin "html-display-mpv" ''
+      export PULSE_PROP="media.role=Takeover"
+      exec ${pkgs.mpv}/bin/mpv \
+        --ao=pulse \
+        --audio-device=pulse/html-display-takeover \
+        "$@"
+    '')
+  ];
 
   # ---------------------------------------------------------------------------
   # Squeezelite
