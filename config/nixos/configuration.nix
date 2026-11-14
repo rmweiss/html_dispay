@@ -118,6 +118,10 @@
     # Hide the mouse pointer after 2 seconds of inactivity.
     seat * hide_cursor 2000
 
+    # Use 4K at 60 Hz for smooth playback of 60 fps video.
+    # Validated as an advertised mode on the Samsung HDMI-A-3 display.
+    output HDMI-A-3 mode 3840x2160@60Hz
+
     # Black background.
     output * bg #000000 solid_color
 
