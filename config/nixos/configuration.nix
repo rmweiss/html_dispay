@@ -423,23 +423,6 @@
     ];
   };
 
-  # Manual mpv entrypoint with the audio routing verified on the N100.
-  # Leave video/render/cache/source options to callers and the future service.
-  # Run in the display user's graphical session. Do not call plain mpv if
-  # the Takeover priority is required.
-  #
-  # The pipewire-pulse stream rule did not reliably add MPV's role in testing,
-  # so pass both the role and the virtual sink explicitly.
-  environment.systemPackages = [
-    (pkgs.writeShellScriptBin "html-display-mpv" ''
-      export PULSE_PROP="media.role=Takeover"
-      exec ${pkgs.mpv}/bin/mpv \
-        --ao=pulse \
-        --audio-device=pulse/html-display-takeover \
-        "$@"
-    '')
-  ];
-
   # ---------------------------------------------------------------------------
   # Squeezelite
   # ---------------------------------------------------------------------------
@@ -465,6 +448,15 @@
   # ---------------------------------------------------------------------------
 
   environment.systemPackages = with pkgs; [
+    # Keep audio ownership stable without pinning video/stream options.
+    # Invoke in display's Wayland/PulseAudio session; pass MPV flags as normal.
+    (pkgs.writeShellScriptBin "html-display-mpv" ''
+      export PULSE_PROP="media.role=Takeover"
+      exec ${pkgs.mpv}/bin/mpv \
+        --ao=pulse \
+        --audio-device=pulse/html-display-takeover \
+        "$@"
+    '')
     chromium
     mpv
     yt-dlp
