@@ -304,6 +304,7 @@
             policy.linking.role-based = required
             html-display.role.external = required
             html-display.role.browser = required
+            html-display.role.takeover = required
           }
         }
         wireplumber.settings = {
@@ -362,6 +363,33 @@
               }
             }
           }
+          {
+            # Highest-priority audio for fullscreen mpv video takeover.
+            name = libpipewire-module-loopback
+            type = pw-module
+            provides = html-display.role.takeover
+            requires = [ support.export-core, pw.node-factory.adapter ]
+            arguments = {
+              node.description = "HTML Display Takeover"
+              capture.props = {
+                node.name = "html-display-takeover"
+                media.class = Audio/Sink
+                audio.position = [ FL, FR ]
+                device.intended-roles = [ "Takeover" ]
+                policy.role-based.target = true
+                policy.role-based.priority = 30
+                policy.role-based.action.same-priority = "mix"
+                policy.role-based.action.lower-priority = "duck"
+              }
+              playback.props = {
+                node.name = "html-display-takeover-output"
+                audio.position = [ FL, FR ]
+                node.passive = true
+                media.role = "Loopback"
+                target.object = "alsa_output.pci-0000_00_1f.3.hdmi-stereo"
+              }
+            }
+          }
         ]
       '')
   ];
@@ -390,6 +418,20 @@
         actions.update-props = {
           "media.role" = "Browser";
           "target.object" = "html-display-browser";
+        };
+      }
+      {
+        # mpv native PipeWire AO bypasses pipewire-pulse stream.rules.
+        # Test with mpv --ao=pulse to assign the Takeover class here.
+        matches = [
+          {
+            "application.process.binary" = "mpv";
+            "media.class" = "Stream/Output/Audio";
+          }
+        ];
+        actions.update-props = {
+          "media.role" = "Takeover";
+          "target.object" = "html-display-takeover";
         };
       }
     ];
@@ -421,6 +463,10 @@
 
   environment.systemPackages = with pkgs; [
     chromium
+    mpv
+    yt-dlp
+    deno
+    socat
     curl
     git
     htop
