@@ -63,11 +63,12 @@ func(c *Client) Discovery(){
   payload,_:=json.Marshal(fields)
   c.publish("homeassistant/"+kind+"/html_display_mpv_"+id+"/config",string(payload),true)
  }
- for _,name:=range []string{"playback","source","position","duration","buffer","buffer_seconds"}{
+ for _,name:=range []string{"playback","source","position","duration","buffer","buffer_seconds","error"}{
   f:=map[string]any{"state_topic":c.Prefix+"/"+name+"/state"}
   if name=="position"||name=="duration"||name=="buffer_seconds"{f["unit_of_measurement"]="s";f["state_class"]="measurement"}
   if name=="buffer"{f["unit_of_measurement"]="%";f["state_class"]="measurement";f["icon"]="mdi:download"}
   if name=="buffer_seconds"{f["icon"]="mdi:timer-sand"}
+  if name=="error"{f["entity_category"]="diagnostic";f["icon"]="mdi:alert-circle-outline"}
   entity("sensor",name,f)
  }
  entity("binary_sensor","video_active",map[string]any{
