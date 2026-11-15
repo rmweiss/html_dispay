@@ -130,11 +130,19 @@ func (c *Controller) monitor(gen uint64,socket string){
 func request(socket string,args ...any)(any,error){
  conn,err:=net.DialTimeout("unix",socket,400*time.Millisecond);if err!=nil{return nil,err}
  defer conn.Close();conn.SetDeadline(time.Now().Add(800*time.Millisecond))
- if err:=json.NewEncoder(conn).Encode(map[string]any{"command":args});err!=nil{return nil,err}
- var response struct{Error string `json:"error"`;Data any `json:"data"`}
- if err:=json.NewDecoder(bufio.NewReader(conn)).Decode(&response);err!=nil{return nil,err}
- if response.Error!="success"{return nil,fmt.Errorf("mpv IPC: %s",response.Error)}
- return response.Data,nil
+ if err:=json.NewEncoder(conn).Encode(map[string]any{"command":args,"request_id":1});err!=nil{return nil,err}
+ decoder:=json.NewDecoder(bufio.NewReader(conn))
+ for {
+  var response struct{
+   RequestID int `json:"request_id"`
+   Error string `json:"error"`
+   Data any `json:"data"`
+  }
+  if err:=decoder.Decode(&response);err!=nil{return nil,err}
+  if response.RequestID!=1{continue} // asynchronous MPV events on the same socket
+  if response.Error!="success"{return nil,fmt.Errorf("mpv IPC: %s",response.Error)}
+  return response.Data,nil
+ }
 }
 func (c *Controller) command(args ...any)error{
  c.mu.Lock();socket:=c.socket;active:=c.cmd!=nil;c.mu.Unlock()
@@ -159,4 +167,15 @@ func(c *Controller) Stop()error{
  go func(pid int){time.Sleep(3*time.Second);c.mu.Lock();still:=c.cmd!=nil&&c.cmd.Process!=nil&&c.cmd.Process.Pid==pid;c.mu.Unlock();if still{_ =syscall.Kill(-pid,syscall.SIGKILL)}}(cmd.Process.Pid)
  return nil
 }
-func(c *Controller) Close(){_ =c.Stop()}
+func(c *Controller) Close(){
+ _=c.Stop()
+ // Do not let the daemon exit while an orphan player still owns fullscreen.
+ deadline:=time.Now().Add(4*time.Second)
+ for time.Now().Before(deadline){
+  c.mu.Lock();cmd:=c.cmd;c.mu.Unlock()
+  if cmd==nil{return}
+  time.Sleep(50*time.Millisecond)
+ }
+ c.mu.Lock();cmd:=c.cmd;c.mu.Unlock()
+ if cmd!=nil&&cmd.Process!=nil{_ =syscall.Kill(-cmd.Process.Pid,syscall.SIGKILL)}
+}
