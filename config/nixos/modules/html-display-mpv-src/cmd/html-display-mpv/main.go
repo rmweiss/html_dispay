@@ -42,6 +42,13 @@ func main(){
    mc.State("source",state.Source)
    mc.State("position",strconv.FormatFloat(state.Position,'f',1,64))
    mc.State("duration",strconv.FormatFloat(state.Duration,'f',1,64))
+   // Empty retained values indicate that MPV has no cache metric available.
+   percent:=""
+   if state.BufferPercent!=nil{percent=strconv.FormatFloat(*state.BufferPercent,'f',0,64)}
+   seconds:=""
+   if state.BufferSeconds!=nil{seconds=strconv.FormatFloat(*state.BufferSeconds,'f',1,64)}
+   mc.State("buffer",percent)
+   mc.State("buffer_seconds",seconds)
   }
   mc.OnConnect=publish
   mc.OnCommand=func(name,payload string){
