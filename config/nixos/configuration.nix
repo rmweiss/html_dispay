@@ -5,6 +5,7 @@
   imports = [
     /etc/nixos/hardware-configuration.nix
     ./modules/tv.nix
+    ./modules/mpv.nix
   ];
 
   # Boot loader
