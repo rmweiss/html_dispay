@@ -40,6 +40,7 @@ func main(){
    state:=p.Snapshot()
    mc.State("playback",state.State)
    mc.State("source",state.Source)
+   mc.State("error",state.Error)
    mc.State("position",strconv.FormatFloat(state.Position,'f',1,64))
    mc.State("duration",strconv.FormatFloat(state.Duration,'f',1,64))
    // Empty retained values indicate that MPV has no cache metric available.
