@@ -5,6 +5,7 @@ import (
  "encoding/json"
  "errors"
  "fmt"
+ "math"
  "net"
  "net/url"
  "os"
@@ -22,6 +23,8 @@ type State struct {
  Source string `json:"source"`
  Position float64 `json:"position"`
  Duration float64 `json:"duration"`
+ BufferPercent *float64 `json:"buffer_percent"`
+ BufferSeconds *float64 `json:"buffer_seconds"`
  Error string `json:"error,omitempty"`
 }
 type Controller struct {
@@ -104,6 +107,7 @@ func (c *Controller) watch(gen uint64,cmd *exec.Cmd,dir string){
  c.cmd=nil;c.socket=""
  if err!=nil&&!stopped{c.state.State="error";c.state.Error=err.Error()}else{c.state.State="idle";c.state.Error=""}
  c.state.Source="";c.state.Position=0;c.state.Duration=0
+ c.state.BufferPercent=nil;c.state.BufferSeconds=nil
  c.publishLocked()
 }
 func (c *Controller) monitor(gen uint64,socket string){
@@ -114,18 +118,38 @@ func (c *Controller) monitor(gen uint64,socket string){
   paused,err1:=request(socket,"get_property","pause")
   pos,err2:=request(socket,"get_property","time-pos")
   duration,err3:=request(socket,"get_property","duration")
+  cachePause,err4:=request(socket,"get_property","paused-for-cache")
+  cachePercent,err5:=request(socket,"get_property","cache-buffering-state")
+  cacheSeconds,err6:=request(socket,"get_property","demuxer-cache-duration")
   if err1!=nil{continue}
   c.mu.Lock()
   if gen!=c.generation||c.cmd==nil{c.mu.Unlock();return}
   if c.state.State!="stopping" {
-   if paused==true{c.state.State="paused"}else{c.state.State="playing"}
+   c.state.State=playbackState(paused==true,err4==nil&&cachePause==true)
    c.state.Error=""
    if err2==nil{if f,ok:=pos.(float64);ok{c.state.Position=f}}
    if err3==nil{if f,ok:=duration.(float64);ok{c.state.Duration=f}}
+   c.state.BufferPercent=validBufferValue(cachePercent,err5,100)
+   c.state.BufferSeconds=validBufferValue(cacheSeconds,err6,math.MaxFloat64)
    c.publishLocked()
   }
   c.mu.Unlock()
  }
+}
+// Cache pause takes precedence over the user's pause state: when MPV has
+// suspended playback to refill the cache, report why it cannot advance.
+func playbackState(paused,cachePaused bool)string{
+ if cachePaused{return "buffering"}
+ if paused{return "paused"}
+ return "playing"
+}
+
+// Missing/unavailable MPV properties must be unknown, not misleading zeros.
+func validBufferValue(value any, err error, max float64)*float64{
+ if err!=nil{return nil}
+ v,ok:=value.(float64)
+ if !ok||math.IsNaN(v)||math.IsInf(v,0)||v<0||v>max{return nil}
+ return &v
 }
 func request(socket string,args ...any)(any,error){
  conn,err:=net.DialTimeout("unix",socket,400*time.Millisecond);if err!=nil{return nil,err}
