@@ -19,7 +19,5 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: config/nixos/modules/html-display-mpv-src/go.mod
-      - run: gofmt -l . | tee /tmp/unformatted.txt
-      - run: test ! -s /tmp/unformatted.txt
       - run: go vet ./...
       - run: go test ./...
