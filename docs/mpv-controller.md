@@ -59,6 +59,7 @@ The daemon connects to the existing broker (same assumption as `html-display-tv`
 | `html-display/mpv/duration/state` | Seconds |
 | `html-display/mpv/buffer/state` | Cache refill progress 0–100%, empty when unavailable |
 | `html-display/mpv/buffer_seconds/state` | Estimated seconds in MPV demuxer cache, empty when unavailable |
+| `html-display/mpv/error/state` | Last MPV startup/exit error, empty for healthy playback or after stop |
 | `html-display/mpv/availability` | `online` or `offline` (Last Will) |
 
 Commands are non-retained and fire-and-forget:
@@ -72,6 +73,12 @@ Commands are non-retained and fire-and-forget:
 Home Assistant MQTT Discovery publishes a playback state sensor, source sensor, position/duration sensors, and a video-active binary sensor. There is **not yet a native media_player entity**. The binary sensor remains ON while `starting`, `playing`, `paused`, `buffering`, or `stopping`, so ambient-light automation can override the backlight while video occupies the display. Home Assistant owns all brightness changes.
 
 The controller publishes its initial idle state after connecting/reconnecting and when the player changes state. Retained MQTT statuses do not start or restore a player after reboot; availability marks old data unavailable after an unclean exit.
+
+## Playback failure handling
+
+If MPV exits with a nonzero status, the controller reports `error` and retains the last attempted source and observed position/duration so the failure can be investigated via `GET /api/player` and the retained MQTT `error/state` diagnostic sensor. A successful new play request replaces the previous failure; stopping playback clears the status. If MPV never opens its JSON IPC socket, the controller terminates it after 15 seconds and records the timeout. This timeout is for establishing **IPC**, not a fixed deadline for downloading or buffering media.
+
+The controller is still a single-player process supervisor. During systemd shutdown it terminates MPV and waits for its process to exit; systemd also owns the service cgroup to catch leftover descendants. Separately validate restart behavior on the N100. A zero-exit MPV attempt without valid media cannot always be distinguished from successful completion without additional playback event tracking.
 
 ## Buffering visibility
 
