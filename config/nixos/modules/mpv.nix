@@ -61,6 +61,16 @@ in {
         Type = "simple";
         User = "display";
         Group = "users";
+        # Provide the expected Wayland/VA-API environment and YouTube tools
+        # when launched by systemd rather than an interactive display shell.
+        Environment = [
+          "LIBVA_DRIVER_NAME=iHD"
+          "XDG_SESSION_TYPE=wayland"
+          "XDG_CURRENT_DESKTOP=sway"
+          "PATH=${lib.makeBinPath [ pkgs.yt-dlp pkgs.deno pkgs.coreutils pkgs.ffmpeg ]}:/run/current-system/sw/bin"
+        ];
+        KillMode = "control-group";
+        TimeoutStopSec = "10s";
         ExecStart = lib.concatStringsSep " " [
           "${package}/bin/html-display-mpv"
           "-http-listen ${lib.escapeShellArg cfg.httpListen}"
