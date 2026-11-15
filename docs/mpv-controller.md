@@ -19,7 +19,21 @@ services.htmlDisplayMPV = {
 };
 ```
 
-Run `sudo nixos-rebuild build` before `sudo nixos-rebuild switch`. The build requires the system's Nixpkgs channel to provide `buildGoModule`; the Go module has no third-party dependencies (Nix `vendorHash = null`). The service unit is `html-display-mpv-controller.service` running as `display`; it is not tied to Sway/Chromium's lifecycle. The daemon discovers the `display` user's Wayland socket when launching MPV and uses the existing PulseAudio takeover wrapper.
+Run `sudo nixos-rebuild build` before `sudo nixos-rebuild switch`. The build requires the system's Nixpkgs channel to provide `buildGoModule`; the Go module has no third-party dependencies (Nix `vendorHash = null`). The service unit is `html-display-mpv-controller.service` running as `display`; it is not tied to Sway/Chromium's lifecycle. The daemon discovers the `display` user's Wayland socket when launching MPV and uses the existing PulseAudio takeover wrapper. The system service explicitly sets `LIBVA_DRIVER_NAME=iHD`, a Wayland session type, and a `PATH` containing `yt-dlp` and `deno` for YouTube extraction. systemd's service cgroup owns the MPV child for cleanup on shutdown.
+
+**Important:** Stop the manually launched `/tmp/html-display-mpv-controller` first (Ctrl+C) before enabling the systemd unit. Otherwise the manual instance already holds TCP port 8081, and the new unit will repeatedly fail to bind.
+
+To enable the systemd service for an appliance test, add `services.htmlDisplayMPV.enable = true;` to your local NixOS config, then build and switch. To inspect it:
+
+```sh
+sudo nixos-rebuild build
+sudo nixos-rebuild switch
+systemctl status html-display-mpv-controller.service --no-pager
+journalctl -u html-display-mpv-controller.service -n 80 --no-pager
+curl http://127.0.0.1:8081/health
+```
+
+Check that the process is owned by `display`, starts without needing an interactive shell, and successfully connects to Wayland/PulseAudio during the first REST-triggered playback.
 
 The HTTP listener is **loopback-only by default**. For remote LAN clients, explicitly set a LAN bind address and configure the firewall appropriately, or proxy with authentication. HTTP playback commands and the default MQTT TCP integration have no authentication. Do not expose either to untrusted networks. YouTube extraction can cause outbound requests and the URL allowlist is currently limited to **scheme** (HTTP/HTTPS), not destinations. The local media path is restricted to regular files inside symlink-resolved configured `localRoots`. Source URLs may be exposed through MQTT, so avoid credential-bearing URLs (URL userinfo is rejected).
 
