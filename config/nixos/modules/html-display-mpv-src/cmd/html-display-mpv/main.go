@@ -77,8 +77,8 @@ func main(){
   if r.Method!="GET"{http.Error(w,"method not allowed",405);return}
   respond(w,200,p.Snapshot())
  })
- decode:=func(r *http.Request,dest any)error{
-  r.Body=http.MaxBytesReader(nil,r.Body,8192)
+ decode:=func(w http.ResponseWriter,r *http.Request,dest any)error{
+  r.Body=http.MaxBytesReader(w,r.Body,8192)
   decoder:=json.NewDecoder(r.Body);decoder.DisallowUnknownFields()
   return decoder.Decode(dest)
  }
@@ -93,7 +93,7 @@ func main(){
  mux.HandleFunc("/api/player/play",func(w http.ResponseWriter,r *http.Request){
   action(w,r,func()error{
    var body struct{Source string `json:"source"`}
-   if err:=decode(r,&body);err!=nil{return err}
+   if err:=decode(w,r,&body);err!=nil{return err}
    _,err:=p.Play(body.Source);return err
   })
  })
@@ -103,7 +103,7 @@ func main(){
  mux.HandleFunc("/api/player/seek",func(w http.ResponseWriter,r *http.Request){
   action(w,r,func()error{
    var body struct{Position float64 `json:"position"`}
-   if err:=decode(r,&body);err!=nil{return err}
+   if err:=decode(w,r,&body);err!=nil{return err}
    return p.Seek(body.Position)
   })
  })
