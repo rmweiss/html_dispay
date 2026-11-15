@@ -61,6 +61,17 @@ in {
         Type = "simple";
         User = "display";
         Group = "users";
+        # This is a system service, not a login shell: provide the tools MPV's
+        # YouTube extractor needs and Intel's validated VA-API driver explicitly.
+        Environment = [
+          "LIBVA_DRIVER_NAME=iHD"
+          "XDG_SESSION_TYPE=wayland"
+          "XDG_CURRENT_DESKTOP=sway"
+          "PATH=${lib.makeBinPath [ pkgs.yt-dlp pkgs.deno pkgs.coreutils pkgs.ffmpeg ]}:/run/current-system/sw/bin"
+        ];
+        # systemd owns the whole service cgroup, including an active MPV child.
+        KillMode = "control-group";
+        TimeoutStopSec = "10s";
         ExecStart = lib.concatStringsSep " " [
           "${package}/bin/html-display-mpv"
           "-http-listen ${lib.escapeShellArg cfg.httpListen}"
