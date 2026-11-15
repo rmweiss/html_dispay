@@ -33,12 +33,13 @@ type Controller struct {
  cmd *exec.Cmd
  socket string
  generation uint64
+ startupTimeout time.Duration
  binary string
  args, roots []string
  onChange func(State)
 }
 func New(binary string,args,roots []string,notify func(State)) *Controller {
- return &Controller{binary:binary,args:append([]string(nil),args...),roots:roots,onChange:notify,state:State{State:"idle"}}
+ return &Controller{binary:binary,args:append([]string(nil),args...),roots:roots,onChange:notify,state:State{State:"idle"},startupTimeout:15*time.Second}
 }
 func (c *Controller) Snapshot() State {c.mu.Lock();defer c.mu.Unlock();return c.state}
 func (c *Controller) publishLocked(){if c.onChange!=nil {state:=c.state;go c.onChange(state)}}
@@ -105,14 +106,25 @@ func (c *Controller) watch(gen uint64,cmd *exec.Cmd,dir string){
  if gen!=c.generation{return}
  stopped:=c.state.State=="stopping"
  c.cmd=nil;c.socket=""
- if err!=nil&&!stopped{c.state.State="error";c.state.Error=err.Error()}else{c.state.State="idle";c.state.Error=""}
- c.state.Source="";c.state.Position=0;c.state.Duration=0
- c.state.BufferPercent=nil;c.state.BufferSeconds=nil
+ switch {
+ case stopped:
+  c.state=State{State:"idle"}
+ case err!=nil:
+  // Keep the attempted source and last observed playback metadata so a
+  // failed URL/decoder remains diagnosable after MPV has exited.
+  c.state.State="error"
+  if c.state.Error==""{c.state.Error=err.Error()}
+  c.state.BufferPercent=nil;c.state.BufferSeconds=nil
+ default:
+  c.state=State{State:"idle"}
+ }
  c.publishLocked()
 }
 func (c *Controller) monitor(gen uint64,socket string){
  ticker:=time.NewTicker(time.Second);defer ticker.Stop()
- for range ticker.C {
+ deadline:=time.Now().Add(c.startupTimeout)
+ ipcReady:=false
+ for {
   c.mu.Lock();active:=gen==c.generation&&c.cmd!=nil;c.mu.Unlock()
   if !active{return}
   paused,err1:=request(socket,"get_property","pause")
@@ -121,7 +133,15 @@ func (c *Controller) monitor(gen uint64,socket string){
   cachePause,err4:=request(socket,"get_property","paused-for-cache")
   cachePercent,err5:=request(socket,"get_property","cache-buffering-state")
   cacheSeconds,err6:=request(socket,"get_property","demuxer-cache-duration")
-  if err1!=nil{continue}
+  if err1!=nil{
+   if !ipcReady&&time.Now().After(deadline){
+    c.failStartup(gen,fmt.Errorf("MPV IPC did not become ready within %s: %w",c.startupTimeout,err1))
+    return
+   }
+   <-ticker.C
+   continue
+  }
+  ipcReady=true
   c.mu.Lock()
   if gen!=c.generation||c.cmd==nil{c.mu.Unlock();return}
   if c.state.State!="stopping" {
@@ -134,7 +154,18 @@ func (c *Controller) monitor(gen uint64,socket string){
    c.publishLocked()
   }
   c.mu.Unlock()
+  <-ticker.C
  }
+}
+// failStartup marks an error *before* terminating the child. The process
+// reaper preserves this reason rather than replacing it with "signal: killed".
+func(c *Controller) failStartup(gen uint64, reason error){
+ c.mu.Lock()
+ if gen!=c.generation||c.cmd==nil||c.state.State!="starting"{c.mu.Unlock();return}
+ c.state.Error=reason.Error()
+ cmd:=c.cmd
+ c.mu.Unlock()
+ if cmd.Process!=nil{_ =syscall.Kill(-cmd.Process.Pid,syscall.SIGTERM)}
 }
 // Cache pause takes precedence over the user's pause state: when MPV has
 // suspended playback to refill the cache, report why it cannot advance.
