@@ -69,7 +69,7 @@ Commands are non-retained and fire-and-forget:
 | `html-display/mpv/playback/set` | `pause`, `resume` (or `play` to resume), `stop` |
 | `html-display/mpv/seek/set` | Absolute seconds as a number |
 
-Home Assistant MQTT Discovery publishes a playback state sensor, source sensor, position/duration sensors, and a video-active binary sensor. There is **not yet a native media_player entity**. The binary sensor remains ON while `starting`, `playing`, `paused`, `buffering`, or `stopping`, so ambient-light automation can override the backlight while video occupies the display. Home Assistant owns all brightness changes.
+Home Assistant MQTT Discovery publishes playback/source/position/duration/cache sensors and a video-active binary sensor. Home Assistant's built-in MQTT integration cannot discover a native `media_player` entity; see [the built-in template media-player example](home-assistant-mpv.md) to create one using the existing MQTT topics and no custom integration. The binary sensor remains ON while `starting`, `playing`, `paused`, `buffering`, or `stopping`, so ambient-light automation can override the backlight while video occupies the display. Home Assistant owns all brightness changes.
 
 The controller publishes its initial idle state after connecting/reconnecting and when the player changes state. Retained MQTT statuses do not start or restore a player after reboot; availability marks old data unavailable after an unclean exit.
 
