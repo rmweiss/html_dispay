@@ -26,7 +26,7 @@ The HTTP listener is **loopback-only by default**. For remote LAN clients, expli
 ## HTTP API
 
 - `GET /health`: { "status": "ok" } (process health, not video readiness)
-- `GET /api/player`: current JSON snapshot: `state`, `source`, `position`, `duration` and optional `error`
+- `GET /api/player`: current JSON snapshot: `state`, `source`, `position`, `duration`, optional `buffer_percent` and `buffer_seconds` (null when unknown), and optional `error`
 - `POST /api/player/play`: JSON `{"source":"https://www.youtube.com/watch?v=..."}` or an allowed absolute local file path; starts a new MPV process and returns immediately
 - `POST /api/player/stop`: gracefully terminate the current process
 - `POST /api/player/pause`, `POST /api/player/resume`: MPV JSON IPC pause control
@@ -53,10 +53,12 @@ The daemon connects to the existing broker (same assumption as `html-display-tv`
 
 | Topic | Meaning |
 | --- | --- |
-| `html-display/mpv/playback/state` | `idle`, `starting`, `playing`, `paused`, `stopping`, `error` |
+| `html-display/mpv/playback/state` | `idle`, `starting`, `playing`, `paused`, `buffering`, `stopping`, `error` |
 | `html-display/mpv/source/state` | Original HTTP(S) URL or resolved permitted path, empty on exit |
 | `html-display/mpv/position/state` | Seconds |
 | `html-display/mpv/duration/state` | Seconds |
+| `html-display/mpv/buffer/state` | Cache refill progress 0–100%, empty when unavailable |
+| `html-display/mpv/buffer_seconds/state` | Estimated seconds in MPV demuxer cache, empty when unavailable |
 | `html-display/mpv/availability` | `online` or `offline` (Last Will) |
 
 Commands are non-retained and fire-and-forget:
@@ -67,9 +69,17 @@ Commands are non-retained and fire-and-forget:
 | `html-display/mpv/playback/set` | `pause`, `resume` (or `play` to resume), `stop` |
 | `html-display/mpv/seek/set` | Absolute seconds as a number |
 
-Home Assistant MQTT Discovery publishes a playback state sensor, source sensor, position/duration sensors, and a video-active binary sensor. There is **not yet a native media_player entity**. The binary sensor remains ON while `starting`, `playing`, `paused`, or `stopping`, so ambient-light automation can override the backlight while video occupies the display. Home Assistant owns all brightness changes.
+Home Assistant MQTT Discovery publishes a playback state sensor, source sensor, position/duration sensors, and a video-active binary sensor. There is **not yet a native media_player entity**. The binary sensor remains ON while `starting`, `playing`, `paused`, `buffering`, or `stopping`, so ambient-light automation can override the backlight while video occupies the display. Home Assistant owns all brightness changes.
 
 The controller publishes its initial idle state after connecting/reconnecting and when the player changes state. Retained MQTT statuses do not start or restore a player after reboot; availability marks old data unavailable after an unclean exit.
+
+## Buffering visibility
+
+MPV's `paused-for-cache` property distinguishes automatic cache stalls from a user pause. The controller reports `buffering` before `paused` when both flags are true. Polling is once per second, so brief cache stalls may not be observed.
+
+MPV's `cache-buffering-state` measures progress towards resuming from a cache stall; it is **not** the percentage of the whole video downloaded. `demuxer-cache-duration` is a rough estimate in seconds that MPV warns can be unreliable or unavailable. When a metric is missing or invalid, REST returns `null` and its retained MQTT state is published as an empty string so the HA sensor becomes unknown rather than reporting zero. Both metrics clear after MPV exits.
+
+These additions do not change the MPV command-line options, cache policy, or the three-level audio priorities.
 
 ## MPV options and audio
 
