@@ -14,7 +14,9 @@ The checked-in [NixOS configuration](../config/nixos/configuration.nix) starts S
 
 ## Proposed ownership and sequence
 
-The Go server owns one mpv child process at a time. It retains its existing Chromium connection and the browser page keeps running underneath. A play request transitions to media mode:
+**Architecture update (2026-11-14):** The Go-server-owned process model below is historical, not the current preference. The preferred design is an optional, independent mpv launcher/controller that starts a fresh mpv process per video, leaves Chromium and `html-display-server` running, and reports playback directly over MQTT. Supervision, transport control and process ownership remain to be implemented. The original sequence is retained below for context.
+
+The original concept had the Go server own one mpv child process at a time. It retained its existing Chromium connection and the browser page kept running underneath. A play request transitioned to media mode:
 
 1. Validate the requested source and reserve the media slot. Only a single request owns playback at a time.
 2. Start mpv in the Sway session as the `display` user. For video, make it fullscreen and focused; audio-only playback leaves Chromium visible. Confirm window and audio behavior on the device rather than assuming launch order guarantees focus.
@@ -31,6 +33,30 @@ Sway can match mpv's actual Wayland `app_id` and apply fullscreen/focus rules. T
 “Highest audio priority” means mpv alone is audible while its stream is active; it suppresses both Chromium and external players. The existing WirePlumber HDMI/DP `priority.session` only helps select a sink. The preferred approach is the role-based policy described in [audio](audio.md), subject to appliance tests for activity, cork/duck semantics, and restoration. If that fails, a state-aware controller may be needed. Do not globally mute the sink or blindly unmute other applications.
 
 The exact Sway and PipeWire control method is deliberately undecided until tested on the appliance. mpv may use native Wayland, with `--fullscreen`, `--keep-open=no`, and a hardware decode setting selected after verifying Intel/VA-API playback. Flags and package references belong in the implementation once validated.
+
+## Appliance validation and preferred playback profile (2026-11-14)
+
+Manual tests with `nix-shell -p mpv yt-dlp deno` on the N100 demonstrated native Wayland fullscreen takeover of the existing Chromium window and automatic return to the same page after mpv exited, including on an EOF-limited test. Intel VA-API hardware decoding worked for local H.264 and 1080p59.94 YouTube AV1 video. Sway's Samsung HDMI-A-3 output supports 3840×2160 at 60 Hz; 4K60 is preferred over constraining YouTube to 30 fps (the test video lacked a 1080p30 variant).
+
+The most promising manually tested YouTube profile used `--fullscreen --keep-open=no --hwdec=vaapi --vo=gpu --gpu-api=opengl --ytdl=yes`, with `--ytdl-format='bestvideo[height<=1080]+bestaudio/best[height<=1080]/best'`, `--cache=yes --cache-secs=60 --demuxer-max-bytes=128MiB --cache-pause=yes --cache-pause-initial=no --cache-pause-wait=10 --pipewire-buffer=200 --cache-on-disk=no`. A 90-second test reported no dropped frames or audio underruns, with a 58-second cache remaining; this is a promising observation, not a guarantee across different videos or network conditions. The `--length=90` test flag is not intended for production playback.
+
+## Planned independent MQTT reporting and Home Assistant brightness policy
+
+The standalone mpv controller should publish **read-only playback status and active media source directly to the existing MQTT broker**, not via `html-display-server`. This is a planned contract, not implemented behavior.
+
+Proposed topic family, matching the existing `html-display/` prefix:
+
+| Topic | Payload / behavior |
+| --- | --- |
+| `html-display/mpv/playback/state` | `idle`, `starting`, `playing`, `paused`, `stopping`, or `error` |
+| `html-display/mpv/source/state` | Current requested media path or URL as a UTF-8 string; empty on idle/stop/failure |
+| `html-display/mpv/availability` | `online` or `offline` for the reporting controller (with MQTT Last Will) |
+
+These are **state/reporting topics**, not commands. A source is the original requested path/URL (e.g. a YouTube page URL), **not** yt-dlp's temporary signed media URL. Do not publish credentials, sensitive query parameters, or private paths without an explicit source-disclosure policy. The status is more useful than a boolean for future pause support. A Home Assistant binary sensor for active video takeover can derive its value from `starting`, `playing` and `paused` (and optionally `stopping` until the window is gone); `paused` should still mean the video occupies the screen. An optional separate diagnostic sensor can expose the full state, and a text sensor the source, via MQTT Discovery.
+
+Publish current state/source on startup and on change, with retained state only if it is explicitly reconciled against the real player process at every controller restart. A stale retained `playing` must never be treated as a command to resume playback. On normal EOF, stop, or launch failure, publish the transition and clear the source. On unexpected controller death, the availability Last Will marks the reporting data unreliable; Home Assistant should use an availability-aware sensor rather than trusting stale state. The exact discovery payload and state transition timing remain to be implemented and tested.
+
+**Brightness ownership:** Home Assistant already calculates Samsung Frame backlight from ambient light. Prefer reporting the video state and letting Home Assistant apply a configurable boost (initial experiment: +10 or +20 on the existing **0–50 ExLink backlight scale**, clamped to 50) while video takeover is active. When video ends, Home Assistant should recalculate from current ambient light, not restore an obsolete sampled backlight value. The mpv launcher should not write backlight itself in this design. Ensure a controller/MQTT failure cannot leave the boost enabled indefinitely. See [brightness](brightness.md) and [ExLink](exlink.md).
 
 ## API sketch, not a contract
 
