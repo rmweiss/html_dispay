@@ -23,6 +23,12 @@ Run `sudo nixos-rebuild build` before `sudo nixos-rebuild switch`. The build req
 
 The HTTP listener is **loopback-only by default**. For remote LAN clients, explicitly set a LAN bind address and configure the firewall appropriately, or proxy with authentication. HTTP playback commands and the default MQTT TCP integration have no authentication. Do not expose either to untrusted networks. YouTube extraction can cause outbound requests and the URL allowlist is currently limited to **scheme** (HTTP/HTTPS), not destinations. The local media path is restricted to regular files inside symlink-resolved configured `localRoots`. Source URLs may be exposed through MQTT, so avoid credential-bearing URLs (URL userinfo is rejected).
 
+## Minimal web interface
+
+Open `http://127.0.0.1:8081/` (or use the SSH tunnel described below). The controller serves a small responsive page containing a video URL field, Play and Stop buttons, and current playback status. It uses the same REST endpoints as other clients. No additional package, web server, or front-end build is needed.
+
+For access from a trusted LAN, explicitly configure `services.htmlDisplayMPV.httpListen = "0.0.0.0:8081";` and add port 8081 to the existing NixOS firewall allowed TCP ports (retain port 8080). Then open `http://html-display:8081/` using the device's resolvable hostname or IP. This exposes the **entire unauthenticated MPV REST API**, not just the form; only do this on an appropriately restricted network. The default remains loopback-only. The form does not replace an active video automatically; stop it first.
+
 ## HTTP API
 
 - `GET /health`: { "status": "ok" } (process health, not video readiness)
