@@ -290,6 +290,18 @@
 
         "monitor.alsa.rules" = [
           {
+            # Set the default HDMI master volume to 75%. WirePlumber's
+            # route-volume setting uses a cubic scale (0.75 ^ 3).
+            matches = [
+              {
+                "device.name" = "alsa_card.pci-0000_00_1f.3";
+              }
+            ];
+            actions.update-props = {
+              "device.routes.default-sink-volume" = 0.421875;
+            };
+          }
+          {
             matches = [
               {
                 "node.name" = "~alsa_output.*hdmi.*";
