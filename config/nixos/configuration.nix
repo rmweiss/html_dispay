@@ -36,7 +36,7 @@
 
   networking.hostName = "html-display";
   networking.networkmanager.enable = true;
-  networking.firewall.allowedTCPPorts = [ 8080 ];
+  networking.firewall.allowedTCPPorts = [ 8080 8081 ];
 
   time.timeZone = "Europe/Zurich";
 
@@ -196,6 +196,12 @@
     enable = true;
     lifecycle.enable = true;
     osdOnStartup = "off";
+  };
+
+  # Independent MPV controller and minimal LAN web interface.
+  services.htmlDisplayMPV = {
+    enable = true;
+    httpListen = "0.0.0.0:8081";
   };
 
   systemd.services.html-display-server = {
