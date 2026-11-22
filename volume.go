@@ -40,7 +40,7 @@ func (v *volumeController) checkSink() error {
  out, err := v.run("inspect", "@DEFAULT_AUDIO_SINK@")
  if err != nil { return err }
  for _, line := range strings.Split(out, "\n") {
-  if strings.TrimSpace(line) == "node.name = \""+hdmiSinkName+"\"" { return nil }
+  if strings.TrimLeft(strings.TrimSpace(line), "* ") == "node.name = \""+hdmiSinkName+"\"" { return nil }
  }
  return fmt.Errorf("default PipeWire sink is not the configured HDMI output %q", hdmiSinkName)
 }
