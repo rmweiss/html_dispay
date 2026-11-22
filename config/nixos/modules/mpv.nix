@@ -36,6 +36,7 @@ in {
       type = lib.types.listOf lib.types.str;
       default = [
         "--fullscreen" "--hwdec=vaapi" "--vo=gpu" "--gpu-api=opengl"
+        "--volume=60"
         "--ytdl=yes"
         "--ytdl-format=bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
         "--cache=yes" "--cache-secs=60" "--demuxer-max-bytes=128MiB"
