@@ -39,6 +39,7 @@ type Server struct {
 	contentFile string
 	mqtt        *mqttController
 	brightness  *brightnessController
+	volume      *volumeController
 }
 
 type displayURLRequest struct {
@@ -287,6 +288,7 @@ func main() {
 		"retained MQTT topic containing the desired page URL",
 	)
 	brightnessBackend := flag.String("brightness-backend", "", "path to busctl for wl-gammarelay-rs; empty disables software brightness")
+	volumeBackend := flag.String("volume-backend", "", "path to wpctl for HDMI output volume; empty disables volume control")
 	showVersion := flag.Bool("version", false, "print build information and exit")
 	flag.Parse()
 
@@ -313,7 +315,10 @@ func main() {
 		chromeCtx: chromeCtx, chromeClose: cleanup,
 		launchMode: *launchLocalBrowser, contentFile: contentFile,
 	}
-	if *brightnessBackend != "" {
+	if *volumeBackend != "" {
+  server.volume = &volumeController{executable: *volumeBackend}
+ }
+ if *brightnessBackend != "" {
   brightness, err := newBrightnessController(*brightnessBackend, brightnessFile)
   if err != nil { log.Fatalf("software brightness state: %v", err) }
   server.brightness = brightness
@@ -380,7 +385,7 @@ func main() {
 	if *mqttBroker != "" {
 		mqttCtl, err := startMQTT(*mqttBroker, *mqttPageTopic, func(url string) error {
    return server.setMQTTPage(url)
-  }, server.brightness)
+  }, server.brightness, server.volume)
 		if err != nil {
 			log.Fatalf("could not start MQTT: %v", err)
 		}
