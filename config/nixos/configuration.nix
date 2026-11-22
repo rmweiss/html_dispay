@@ -239,6 +239,14 @@
 
   security.rtkit.enable = true;
 
+  # The N100's built-in Intel adapter is already detected and unblocked.
+  # BlueZ stores paired/trusted devices in /var/lib/bluetooth across reboots.
+  # Pair new devices using bluetoothctl; no pairing UI or MQTT service needed.
+  hardware.bluetooth = {
+    enable = true;
+    settings.General.Name = "HTML Display";
+  };
+
 
   services.pipewire = {
     enable = true;
@@ -256,6 +264,24 @@
           "device.restore-profile" = false;
           "device.restore-routes" = false;
         };
+
+        # Incoming phone audio is a native BlueZ PipeWire playback stream,
+        # not a pipewire-pulse stream. Match the observed bluez_input.* node
+        # regardless of the paired device's Bluetooth address.
+        "monitor.bluez.rules" = [
+          {
+            matches = [
+              {
+                "node.name" = "~bluez_input\\..*";
+                "media.class" = "Stream/Output/Audio";
+              }
+            ];
+            actions.update-props = {
+              "media.role" = "Bluetooth";
+              "target.object" = "html-display-bluetooth";
+            };
+          }
+        ];
 
         "monitor.alsa.rules" = [
           {
@@ -305,6 +331,7 @@
             policy.linking.role-based = required
             html-display.role.external = required
             html-display.role.browser = required
+            html-display.role.bluetooth = required
             html-display.role.takeover = required
           }
         }
@@ -365,6 +392,34 @@
             }
           }
           {
+            # Conscious, phone-initiated audio takes precedence over the browser
+            # and background player, but remains below explicit MPV takeover.
+            name = libpipewire-module-loopback
+            type = pw-module
+            provides = html-display.role.bluetooth
+            requires = [ support.export-core, pw.node-factory.adapter ]
+            arguments = {
+              node.description = "HTML Display Bluetooth"
+              capture.props = {
+                node.name = "html-display-bluetooth"
+                media.class = Audio/Sink
+                audio.position = [ FL, FR ]
+                device.intended-roles = [ "Bluetooth" ]
+                policy.role-based.target = true
+                policy.role-based.priority = 30
+                policy.role-based.action.same-priority = "mix"
+                policy.role-based.action.lower-priority = "duck"
+              }
+              playback.props = {
+                node.name = "html-display-bluetooth-output"
+                audio.position = [ FL, FR ]
+                node.passive = true
+                media.role = "Loopback"
+                target.object = "alsa_output.pci-0000_00_1f.3.hdmi-stereo"
+              }
+            }
+          }
+          {
             # Highest-priority audio for fullscreen mpv video takeover.
             name = libpipewire-module-loopback
             type = pw-module
@@ -378,7 +433,7 @@
                 audio.position = [ FL, FR ]
                 device.intended-roles = [ "Takeover" ]
                 policy.role-based.target = true
-                policy.role-based.priority = 30
+                policy.role-based.priority = 40
                 policy.role-based.action.same-priority = "mix"
                 policy.role-based.action.lower-priority = "duck"
               }
