@@ -272,8 +272,7 @@
           {
             matches = [
               {
-                "node.name" = "~bluez_input\\..*";
-                "media.class" = "Stream/Output/Audio";
+                "node.name" = "~bluez_input.*";
               }
             ];
             actions.update-props = {
