@@ -74,3 +74,70 @@ Music Assistant remains responsible for playlist, transport, and player volume. 
 See [deployment](deployment.md#music-assistant-and-audio) for setup and diagnostics. Future MPV integration must still test Browser → MPV → Browser and all three together, plus explicit pause/stop/crash recovery.
 
 Upstream references: [role policy](https://pipewire.pages.freedesktop.org/wireplumber/daemon/configuration/features.html), [WirePlumber 0.5.14 role-sink example](https://github.com/PipeWire/wireplumber/blob/0.5.14/src/config/wireplumber.conf.d.examples/media-role-nodes.conf), and [PipeWire PulseAudio stream rules](https://docs.pipewire.org/page_module_protocol_pulse.html).
+
+
+## Bluetooth A2DP speaker (proposed; requires appliance validation)
+
+The N100's Intel Bluetooth 9460/9560 adapter was detected by `lsusb` and
+`rfkill`. During an uncommitted `nixos-rebuild test`, enabling BlueZ was
+sufficient for a Samsung S24 to pair and play through HDMI in the `display`
+user's existing PipeWire session. The stream appeared as
+`bluez_input.*` under **Streams**, linked directly to the Samsung HDMI
+ports; it bypassed the existing role sinks.
+
+The NixOS configuration now enables BlueZ persistently and adds a Bluetooth
+priority sink and `monitor.bluez.rules` node rule. This rule classifies
+incoming native BlueZ `Stream/Output/Audio` nodes with
+`node.name = ~bluez_input\\..*` as role `Bluetooth` and sets
+`target.object = html-display-bluetooth`. This deliberately does **not**
+depend on an individual phone MAC or use `pipewire-pulse` stream rules.
+
+The desired priority policy is now:
+
+| Priority | Class | Producer |
+| --- | --- | --- |
+| 40 | Takeover | Explicit MPV video/audio takeover |
+| 30 | Bluetooth | Phone-initiated Bluetooth A2DP playback |
+| 20 | Browser | Chromium and Scene Composer |
+| 10 | External | Squeezelite |
+
+Paired/trusted devices remain in BlueZ's persistent storage under
+`/var/lib/bluetooth`. Pairing new devices remains a manual
+`bluetoothctl` operation; no new Go service, Home Assistant pairing
+interface, or MQTT entities are added. Bluetooth stream volume and HDMI
+master volume remain distinct.
+
+**This routing policy has not yet been validated on the physical appliance.**
+In particular, even if the WirePlumber rule matches the stream, we need to
+verify that the A2DP audio is actually linked through
+`html-display-bluetooth`, not directly to HDMI, and that stream/link lifetime
+does not keep lower-priority audio suppressed while the phone is paused.
+
+### Appliance acceptance checks
+
+1. Rebuild and confirm `bluetooth.service` is active. The previously paired
+   phone should remain paired; manually reconnect if needed. Pairing state
+   surviving reboot and automatic reconnection still need verification.
+2. In the `display` user environment, run `wpctl status` while playing
+   from the phone. Confirm a new `html-display-bluetooth` filter sink and a
+   `bluez_input.*` stream linked to its input ports rather than HDMI ports.
+3. Start Squeezelite, then Bluetooth audio. Only Bluetooth should be audible;
+   Music Assistant should continue advancing in the background.
+4. Start Chromium audio. Bluetooth should remain audible. Pause Bluetooth;
+   Chromium should return, then Squeezelite when browser audio ends.
+5. Start MPV while Bluetooth plays. Only MPV should be heard. On MPV exit,
+   Bluetooth should become audible again if still active.
+6. Verify Bluetooth play/pause/resume, disconnect/reconnect, and volume button
+   behavior. Test for stale priority after stopping playback.
+7. Check logs with `journalctl --user -u wireplumber` under the display
+   user session if node creation or link routing fails.
+
+To inspect the appliance audio session from an admin shell:
+
+```sh
+uid=$(id -u display)
+sudo -u display env XDG_RUNTIME_DIR="/run/user/$uid" wpctl status
+```
+
+A role-sink node being present alone is **not** proof of successful routing.
+The playback links and audible priority behavior are the acceptance criteria.
