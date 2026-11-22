@@ -31,7 +31,7 @@ type mqttController struct {
 	pendingEcho map[string]int
 }
 
-func startMQTT(broker, pageTopic string, setPage func(string) error, brightness *brightnessController) (*mqttController, error) {
+func startMQTT(broker, pageTopic string, setPage func(string) error, brightness *brightnessController, volume *volumeController) (*mqttController, error) {
 	if strings.TrimSpace(pageTopic) == "" {
 		return nil, fmt.Errorf("MQTT page topic must not be empty")
 	}
@@ -63,7 +63,7 @@ func startMQTT(broker, pageTopic string, setPage func(string) error, brightness 
 			}
 		}
 
-		if err := publishHomeAssistantDiscovery(client, pageTopic, brightness); err != nil {
+		if err := publishHomeAssistantDiscovery(client, pageTopic, brightness, volume); err != nil {
 			log.Printf("could not publish Home Assistant discovery: %v", err)
 		}
 
@@ -110,6 +110,25 @@ func startMQTT(broker, pageTopic string, setPage func(string) error, brightness 
    })
    if tok.Wait() && tok.Error() != nil { log.Printf("could not subscribe to brightness topic: %v", tok.Error()) }
   }
+  if volume != nil {
+   // Commands are not retained, so a stale volume cannot override the real sink.
+   if current, err := volume.get(); err != nil {
+    log.Printf("HDMI volume unavailable: %v", err)
+   } else if err := controller.publishVolume(current); err != nil {
+    log.Printf("could not publish HDMI volume: %v", err)
+   }
+   tok := client.Subscribe(volumeSetTopic, mqttQoS, func(_ mqtt.Client, message mqtt.Message) {
+    requested, err := strconv.Atoi(strings.TrimSpace(string(message.Payload())))
+    if err != nil || requested < 0 || requested > 100 {
+     log.Printf("invalid HDMI volume command %q", string(message.Payload()))
+     return
+    }
+    actual, err := volume.set(requested)
+    if err != nil { log.Printf("HDMI volume command failed: %v", err); return }
+    if err := controller.publishVolume(actual); err != nil { log.Printf("could not publish HDMI volume state: %v", err) }
+   })
+   if tok.Wait() && tok.Error() != nil { log.Printf("could not subscribe to HDMI volume topic: %v", tok.Error()) }
+  }
 	}
 
 	opts.OnConnectionLost = func(_ mqtt.Client, err error) {
@@ -125,6 +144,7 @@ func startMQTT(broker, pageTopic string, setPage func(string) error, brightness 
 	}
 
 	go controller.runHeartbeat()
+ if volume != nil { go controller.watchVolume(volume) }
 
 	return controller, nil
 }
@@ -154,7 +174,7 @@ func (m *mqttController) runHeartbeat() {
 	}
 }
 
-func publishHomeAssistantDiscovery(client mqtt.Client, pageTopic string, brightness *brightnessController) error {
+func publishHomeAssistantDiscovery(client mqtt.Client, pageTopic string, brightness *brightnessController, volume *volumeController) error {
 	payload := map[string]any{
 		"o": map[string]any{
 			"name": "html-display",
@@ -203,6 +223,20 @@ if brightness != nil {
    "step": 1,
    "unit_of_measurement": "%",
    "icon": "mdi:brightness-6",
+  }
+ }
+
+ if volume != nil {
+  payload["cmps"].(map[string]any)["hdmi_volume"] = map[string]any{
+   "p": "number",
+   "name": "HDMI Volume",
+   "unique_id": "html_display_hdmi_volume",
+   "command_topic": volumeSetTopic,
+   "state_topic": volumeStateTopic,
+   "min": 0, "max": 100, "step": 1,
+   "unit_of_measurement": "%",
+   "icon": "mdi:volume-high",
+   "mode": "slider",
   }
  }
  body, err := json.Marshal(payload)
@@ -302,4 +336,31 @@ func (m *mqttController) publishBrightness(value int) error {
  token := m.client.Publish(brightnessStateTopic, mqttQoS, true, strconv.Itoa(value))
  if !token.Wait() { return fmt.Errorf("MQTT publish did not complete") }
  return token.Error()
+}
+
+func (m *mqttController) publishVolume(value int) error {
+ token := m.client.Publish(volumeStateTopic, mqttQoS, true, strconv.Itoa(value))
+ if !token.Wait() { return fmt.Errorf("HDMI volume publish did not complete") }
+ return token.Error()
+}
+
+// Polling also catches manual wpctl changes. Publish only changes to avoid
+// unnecessary MQTT traffic and keep Home Assistant synchronized.
+func (m *mqttController) watchVolume(volume *volumeController) {
+ ticker := time.NewTicker(3 * time.Second)
+ defer ticker.Stop()
+ last := -1
+ for {
+  select {
+  case <-m.heartbeatStop: return
+  case <-ticker.C:
+   if !m.client.IsConnected() { last = -1; continue }
+   actual, err := volume.get()
+   if err != nil { log.Printf("HDMI volume poll failed: %v", err); continue }
+   if actual != last {
+    if err := m.publishVolume(actual); err != nil { log.Printf("HDMI volume publish failed: %v", err); continue }
+    last = actual
+   }
+  }
+ }
 }
