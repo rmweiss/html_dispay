@@ -223,7 +223,7 @@
       User = "display";
       Group = "users";
 
-      ExecStart = "${pkgs.callPackage ./modules/html-display-server.nix { }}/bin/html-display-server -mqtt-broker tcp://192.168.10.12:1883 -brightness-backend ${pkgs.systemd}/bin/busctl";
+      ExecStart = "${pkgs.callPackage ./modules/html-display-server.nix { }}/bin/html-display-server -mqtt-broker tcp://192.168.10.12:1883 -brightness-backend ${pkgs.systemd}/bin/busctl -volume-backend ${pkgs.wireplumber}/bin/wpctl";
 
       StateDirectory = "html-display";
 
